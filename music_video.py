@@ -22,7 +22,7 @@ VERSION = "2.1.0"
 # ---------- PAGE ----------
 st.set_page_config(page_title="Music Video Maker", layout="centered")
 st.title(f"🎵 Music Video Maker v{VERSION}")
-st.markdown("Combine background (video/audio) with overlay (image/video)")
+st.markdown("Create videos with audio from any file and image/video overlay")
 
 # ---------- VERSION INFO ----------
 st.subheader("📦 Environment Versions")
@@ -36,284 +36,303 @@ Pillow         : {Image.__version__}
 col1, col2 = st.columns(2)
 
 with col1:
-    bg_file = st.file_uploader(
-        "Background (Video or Audio)",
-        type=["mp4", "mov", "avi", "mp3", "wav", "m4a", "aac", "mpeg4"],
-        help="Upload video (with audio) or audio-only file"
+    background_file = st.file_uploader(
+        "Background Music/Video",
+        type=["mp3", "wav", "m4a", "aac", "mp4", "mov", "avi", "mpeg", "mkv"],
+        help="Upload ANY file (video or audio) - only the audio will be used"
     )
 
 with col2:
     overlay_file = st.file_uploader(
         "Overlay (Image or Video)",
-        type=["mp4", "mov", "avi", "png", "jpg", "jpeg", "gif"],
-        help="Upload image or video to overlay on top"
+        type=["mp4", "mov", "avi", "png", "jpg", "jpeg", "gif", "webp"],
+        help="Upload image or video to display on screen"
     )
 
-# ---------- PROCESS ----------
-if st.button("🎬 Create Video", type="primary") and bg_file and overlay_file:
+# ---------- SIMPLE PROCESS ----------
+if st.button("🎬 Create Music Video", type="primary") and background_file and overlay_file:
 
-    with st.spinner("Creating your video..."):
+    with st.spinner("Creating your music video..."):
         
         # Save uploaded files
-        def save_temp(upload):
-            f = tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(upload.name)[1])
+        def save_temp(upload, suffix=""):
+            f = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
             f.write(upload.read())
             f.close()
             return f.name
         
-        bg_path = save_temp(bg_file)
-        overlay_path = save_temp(overlay_file)
+        # Get file extension
+        bg_ext = os.path.splitext(background_file.name)[1].lower()
+        overlay_ext = os.path.splitext(overlay_file.name)[1].lower()
+        
+        # Save files with proper extensions
+        bg_path = save_temp(background_file, bg_ext)
+        overlay_path = save_temp(overlay_file, overlay_ext)
         
         # Video settings
         VIDEO_WIDTH, VIDEO_HEIGHT = 1080, 1920  # Vertical mobile format
         FPS = 30
         
         try:
-            # ----- STEP 1: PROCESS BACKGROUND -----
-            st.info("🎵 Processing background...")
+            # ----- STEP 1: EXTRACT AUDIO FROM BACKGROUND FILE -----
+            st.info("🎵 Extracting audio...")
             
-            # Check if file is video or audio
-            is_video = bg_file.type.startswith("video") or bg_file.name.lower().endswith(('.mp4', '.mov', '.avi'))
+            # Check file type by extension or content type
+            is_video_file = background_file.type.startswith('video') or bg_ext in ['.mp4', '.mov', '.avi', '.mpeg', '.mkv']
             
-            if is_video:
-                # Video file (has both video and audio)
-                bg_clip = VideoFileClip(bg_path)
-                bg_duration = bg_clip.duration
-                bg_audio = bg_clip.audio
-                
-                # If video, we'll use it but make it very dim/transparent
-                # Resize to fill screen
-                bg_clip = bg_clip.resize((VIDEO_WIDTH, VIDEO_HEIGHT))
-                
-                # Make video very dim (10% opacity) so overlay is focus
-                bg_clip = bg_clip.fl_image(lambda img: (img * 0.1).astype('uint8'))
-                
-                st.info(f"Video background: {bg_duration:.1f}s")
-                
+            if is_video_file:
+                # If it's a video file, extract audio
+                video_clip = VideoFileClip(bg_path)
+                audio_clip = video_clip.audio
+                if audio_clip is None:
+                    st.error("❌ No audio found in the video file!")
+                    st.stop()
             else:
-                # Audio-only file
-                bg_audio = AudioFileClip(bg_path)
-                bg_duration = bg_audio.duration
-                
-                # Create simple dark background
-                bg_clip = ColorClip(
-                    size=(VIDEO_WIDTH, VIDEO_HEIGHT),
-                    color=(20, 20, 30),  # Dark blue-gray
-                    duration=bg_duration
-                )
-                bg_clip = bg_clip.set_audio(bg_audio)
-                
-                st.info(f"Audio background: {bg_duration:.1f}s")
+                # If it's an audio file
+                audio_clip = AudioFileClip(bg_path)
             
-            # ----- STEP 2: PROCESS OVERLAY -----
+            audio_duration = audio_clip.duration
+            st.info(f"Audio duration: {audio_duration:.1f} seconds")
+            
+            # ----- STEP 2: CREATE SIMPLE BACKGROUND -----
+            st.info("🎨 Creating background...")
+            # Create a simple gradient-like background (dark to darker)
+            background = ColorClip(
+                size=(VIDEO_WIDTH, VIDEO_HEIGHT),
+                color=(15, 15, 25),  # Dark blue-black
+                duration=audio_duration
+            )
+            
+            # ----- STEP 3: PROCESS OVERLAY -----
             st.info("🖼️ Processing overlay...")
             
-            is_image = overlay_file.type.startswith("image") or overlay_file.name.lower().endswith(('.png', '.jpg', '.jpeg', '.gif'))
+            # Check if overlay is image or video
+            is_image = overlay_file.type.startswith('image') or overlay_ext in ['.png', '.jpg', '.jpeg', '.gif', '.webp']
             
             if is_image:
-                # Image overlay
+                # For images
                 try:
-                    # Load image
                     img = Image.open(overlay_path)
                     img_width, img_height = img.size
+                    st.info(f"Image size: {img_width}x{img_height}")
                     
-                    # Resize to fit nicely (70% of screen height max)
-                    max_height = int(VIDEO_HEIGHT * 0.7)
-                    if img_height > max_height:
-                        scale = max_height / img_height
-                        new_width = int(img_width * scale)
-                        new_height = max_height
-                    else:
-                        new_width = img_width
-                        new_height = img_height
+                    # Simple resize - make it 70% of video height
+                    target_height = int(VIDEO_HEIGHT * 0.7)
+                    target_width = int(img_width * (target_height / img_height))
                     
                     # Ensure not too wide
-                    if new_width > VIDEO_WIDTH * 0.9:
-                        scale = (VIDEO_WIDTH * 0.9) / new_width
-                        new_width = int(new_width * scale)
-                        new_height = int(new_height * scale)
+                    if target_width > VIDEO_WIDTH * 0.9:
+                        target_width = int(VIDEO_WIDTH * 0.9)
+                        target_height = int(img_height * (target_width / img_width))
                     
                     # Resize
                     if hasattr(Image, 'Resampling'):
-                        img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+                        img = img.resize((target_width, target_height), Image.Resampling.LANCZOS)
                     else:
-                        img = img.resize((new_width, new_height), Image.LANCZOS)
+                        img = img.resize((target_width, target_height), Image.LANCZOS)
                     
-                    # Save temp
+                    # Save resized
                     temp_img = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
                     img.save(temp_img.name, "PNG")
                     
-                    # Create clip
-                    overlay = ImageClip(temp_img.name, duration=bg_duration)
+                    # Create image clip
+                    overlay = ImageClip(temp_img.name, duration=audio_duration)
                     
                 except Exception as e:
                     st.warning(f"Image issue: {e}")
-                    # Fallback
-                    overlay = ColorClip(
-                        size=(500, 500),
-                        color=(255, 100, 100),
-                        duration=bg_duration
-                    )
+                    # Fallback - use original
+                    overlay = ImageClip(overlay_path, duration=audio_duration)
                     
             else:
-                # Video overlay
+                # For video overlays
                 try:
                     overlay = VideoFileClip(overlay_path)
+                    st.info(f"Video overlay: {overlay.size[0]}x{overlay.size[1]}, {overlay.duration:.1f}s")
                     
-                    # Match duration with background
-                    if overlay.duration < bg_duration:
-                        # Loop if shorter
-                        loops = int(bg_duration / overlay.duration) + 1
+                    # Handle duration
+                    if overlay.duration < audio_duration:
+                        # Loop video
+                        loops = int(audio_duration // overlay.duration) + 1
                         overlay = concatenate_videoclips([overlay] * loops)
-                        overlay = overlay.subclip(0, bg_duration)
-                    elif overlay.duration > bg_duration:
-                        # Trim if longer
-                        overlay = overlay.subclip(0, bg_duration)
-                        
+                        overlay = overlay.subclip(0, audio_duration)
+                    elif overlay.duration > audio_duration:
+                        # Trim video
+                        overlay = overlay.subclip(0, audio_duration)
+                    
+                    # Simple resize
+                    try:
+                        overlay = overlay.resize(height=int(VIDEO_HEIGHT * 0.7))
+                    except:
+                        pass  # Skip resize if it fails
+                    
                 except Exception as e:
-                    st.warning(f"Video issue: {e}")
-                    # Fallback
+                    st.error(f"Video overlay error: {e}")
+                    # Create placeholder
                     overlay = ColorClip(
                         size=(500, 500),
-                        color=(100, 255, 100),
-                        duration=bg_duration
+                        color=(200, 100, 100),
+                        duration=audio_duration
                     )
             
-            # Resize overlay if needed
-            try:
-                # Simple resize to 60-80% of screen
-                target_size = min(overlay.size[0], overlay.size[1], VIDEO_WIDTH * 0.8, VIDEO_HEIGHT * 0.8)
-                if overlay.size[0] > overlay.size[1]:
-                    # Wider than tall
-                    new_width = int(VIDEO_WIDTH * 0.8)
-                    overlay = overlay.resize(width=new_width)
-                else:
-                    # Taller than wide
-                    new_height = int(VIDEO_HEIGHT * 0.7)
-                    overlay = overlay.resize(height=new_height)
-            except:
-                # If resize fails, keep original
-                pass
-            
-            # Position overlay center
+            # Position overlay
             overlay = overlay.set_position("center")
             
-            # ----- STEP 3: COMBINE -----
-            st.info("🎥 Combining...")
+            # ----- STEP 4: COMBINE EVERYTHING -----
+            st.info("🎥 Creating final video...")
             
-            # If background is video, combine with overlay
-            # If background is audio-only, we already have it in bg_clip
-            
+            # Create composite
             final_video = CompositeVideoClip(
-                [bg_clip, overlay],
+                [background, overlay],
                 size=(VIDEO_WIDTH, VIDEO_HEIGHT)
             )
             
-            # Set duration and FPS
-            final_video = final_video.set_duration(bg_duration)
+            # Add audio
+            final_video = final_video.set_audio(audio_clip)
+            final_video = final_video.set_duration(audio_duration)
             final_video = final_video.set_fps(FPS)
             
-            # If background was video, audio is already attached
-            # If background was audio-only, audio is already attached to bg_clip
-            
-            # ----- STEP 4: SAVE -----
-            st.info("💾 Saving...")
+            # ----- STEP 5: SAVE VIDEO -----
+            st.info("💾 Saving video file...")
             
             output_path = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4").name
             
+            # Simple write
             final_video.write_videofile(
                 output_path,
                 fps=FPS,
                 codec="libx264",
                 audio_codec="aac",
                 verbose=False,
-                logger=None
+                logger=None,
+                threads=2,
+                preset='fast'
             )
             
-            # Cleanup temp files
-            temp_files = [bg_path, overlay_path]
+            # Cleanup
+            cleanup_files = [bg_path, overlay_path]
             if 'temp_img' in locals():
-                temp_files.append(temp_img.name)
+                cleanup_files.append(temp_img.name)
             
-            for file_path in temp_files:
-                if os.path.exists(file_path):
+            for file in cleanup_files:
+                if os.path.exists(file):
                     try:
-                        os.remove(file_path)
+                        os.remove(file)
                     except:
                         pass
             
-            bg_type = "Video" if is_video else "Audio"
-            overlay_type = "Image" if is_image else "Video"
-            st.success(f"✅ Video created! ({bg_type} + {overlay_type})")
+            st.success(f"✅ Music video created successfully!")
             
         except Exception as e:
-            st.error(f"❌ Error: {str(e)}")
+            st.error(f"❌ Error creating video: {str(e)}")
             import traceback
-            with st.expander("See error details"):
+            with st.expander("Technical details"):
                 st.code(traceback.format_exc())
             st.stop()
     
-    # ----- STEP 5: RESULTS -----
-    st.subheader("🎬 Your Video")
+    # ----- STEP 6: SHOW RESULT -----
+    st.subheader("🎬 Your Music Video")
     
-    # Show video
+    # Video info
+    video_info = f"""
+    **Video Info:**
+    - Duration: {audio_duration:.1f} seconds
+    - Resolution: {VIDEO_WIDTH} × {VIDEO_HEIGHT} (Vertical)
+    - Background: Audio from {background_file.name}
+    - Overlay: {overlay_file.name}
+    """
+    st.markdown(video_info)
+    
+    # Preview
     try:
         st.video(output_path)
     except:
-        st.info("Preview may not show. Download to view.")
+        st.info("💡 *Preview may not show in browser. Download to view.*")
     
-    # File info
-    file_size = os.path.getsize(output_path) / (1024 * 1024)  # MB
-    
-    # Download button
-    with open(output_path, "rb") as f:
-        st.download_button(
-            f"⬇ Download Video ({file_size:.1f} MB)",
-            f,
-            file_name="my_video.mp4",
-            mime="video/mp4",
-            type="primary"
-        )
-    
-    # Info
-    with st.expander("📊 Video Info"):
-        st.write(f"- **Duration**: {bg_duration:.1f} seconds")
-        st.write(f"- **Resolution**: {VIDEO_WIDTH} x {VIDEO_HEIGHT}")
-        st.write(f"- **FPS**: {FPS}")
-        st.write(f"- **Background**: {'Video' if is_video else 'Audio'}")
-        st.write(f"- **Overlay**: {'Image' if is_image else 'Video'}")
-        st.write(f"- **File Size**: {file_size:.1f} MB")
+    # Download
+    if os.path.exists(output_path):
+        file_size = os.path.getsize(output_path) / (1024 * 1024)  # MB
+        
+        with open(output_path, "rb") as f:
+            st.download_button(
+                f"⬇ Download Video ({file_size:.1f} MB)",
+                f,
+                file_name="music_video.mp4",
+                mime="video/mp4",
+                type="primary"
+            )
+        
+        # Auto-cleanup after 5 minutes
+        @st.cache_resource(ttl=300)
+        def cleanup_output():
+            if os.path.exists(output_path):
+                try:
+                    os.remove(output_path)
+                except:
+                    pass
 
 else:
-    # Instructions
+    # Show instructions when no files uploaded
     st.markdown("""
-    ### How it works:
-    1. **Upload Background** - Video (with sound) OR audio-only file
-    2. **Upload Overlay** - Image or video to display on top
-    3. **Click Create** - Get your combined video
+    ### 🎯 How to use this tool:
     
-    ### Examples:
-    - 🎵 Music + 📸 Photo = Music video
-    - 🎬 Movie clip + 🖼️ Logo = Branded clip
-    - 🎤 Podcast + 📹 Video = Visual podcast
-    - 🎼 Song + 🎥 Effects = Enhanced video
+    1. **Upload Background** (any of these):
+       - Music file: MP3, WAV, M4A, AAC
+       - Video file: MP4, MOV, AVI, MKV
+       - *Only the audio will be used*
+    
+    2. **Upload Overlay** (any of these):
+       - Image: PNG, JPG, JPEG, GIF, WEBP
+       - Video: MP4, MOV, AVI
+    
+    3. **Click "Create Music Video"**
+    
+    ### ✨ What you get:
+    - Vertical video (1080×1920)
+    - Your audio playing
+    - Your overlay displayed
+    - MP4 format ready to share
     """)
 
-# ---------- SIMPLE FAQ ----------
-with st.expander("❓ FAQ"):
+# ---------- FEATURES ----------
+with st.expander("✨ Features"):
     st.markdown("""
-    **Q: What if my overlay is shorter than the background?**
-    A: Images will show for entire duration. Videos will loop.
+    ### ✅ What this tool does:
     
-    **Q: Can I use YouTube videos?**
-    A: Upload MP4 files from YouTube downloads.
+    **Background Audio:**
+    - Accepts ANY audio or video file
+    - Extracts audio automatically
+    - Uses only the audio track
     
-    **Q: What's the maximum duration?**
-    A: Depends on file size. Keep under 100MB per file.
+    **Overlay Display:**
+    - Images: Displayed for full duration
+    - Videos: Looped if shorter than audio
+    - Auto-resized to fit screen
     
-    **Q: Video is too large?**
-    A: Try shorter clips or compress files first.
+    **Output:**
+    - Vertical format (mobile-friendly)
+    - High quality MP4
+    - Fast processing
+    - Clean, simple interface
+    """)
+
+# ---------- TROUBLESHOOTING ----------
+with st.expander("🛠️ Need help?"):
+    st.markdown("""
+    ### Common issues:
     
-    **Q: Audio not playing?**
-    A: Ensure your background file has audio (for video files).
+    **File not working?**
+    - Try converting to MP3 (for audio) or MP4 (for video)
+    - Use online converters like CloudConvert
+    
+    **Video too large?**
+    - Trim your audio/video before uploading
+    - Use shorter files (<10 minutes)
+    
+    **Quality issues?**
+    - Use high-quality source files
+    - Images: 1000px minimum width/height
+    
+    **Slow processing?**
+    - Smaller files process faster
+    - Close other browser tabs
     """)
