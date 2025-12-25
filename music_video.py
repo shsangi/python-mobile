@@ -18,6 +18,14 @@ from moviepy.editor import (
 st.set_page_config(page_title="Simple Video Maker", layout="centered")
 st.title("🎬 Simple Video Maker")
 
+# ---------- VERSION INFO ----------
+st.subheader("📦 Environment Versions")
+st.code(f"""
+MoviePy        : {moviepy.__version__}
+Decorator      : {decorator.__version__}
+FFmpeg (path)  : {imageio_ffmpeg.get_ffmpeg_exe()}
+""")
+
 # ---------- UPLOADS ----------
 bg_file = st.file_uploader(
     "Background (Video or Audio)",
