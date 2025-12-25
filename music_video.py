@@ -18,12 +18,12 @@ from moviepy.editor import (
 )
 
 # Add version tracking
-VERSION = "2.2.0"
+VERSION = "2.3.0"
 
 # ---------- PAGE ----------
-st.set_page_config(page_title="Fullscreen Video Maker", layout="centered")
-st.title(f"📱 Fullscreen Video Maker v{VERSION}")
-st.markdown("Create fullscreen videos with background audio")
+st.set_page_config(page_title="Mobile Video Maker", layout="centered")
+st.title(f"📱 Mobile Video Maker v{VERSION}")
+st.markdown("Create mobile videos that fill the entire screen")
 
 # ---------- VERSION INFO ----------
 st.subheader("📦 Environment Versions")
@@ -38,51 +38,41 @@ col1, col2 = st.columns(2)
 
 with col1:
     background_file = st.file_uploader(
-        "Background Music/Video",
+        "Background Music",
         type=["mp3", "wav", "m4a", "aac", "mp4", "mov", "avi", "mpeg", "mkv"],
-        help="Upload ANY file - only audio will be used"
+        help="Upload audio or video file - only audio will be used"
     )
 
 with col2:
     overlay_file = st.file_uploader(
-        "Fullscreen Overlay (Image or Video)",
+        "Screen Content (Image or Video)",
         type=["mp4", "mov", "avi", "png", "jpg", "jpeg", "gif", "webp", "bmp"],
-        help="Upload image/video - will fill entire screen"
+        help="Upload image or video - will fill the entire screen"
     )
 
-# ---------- MOBILE SCREEN SETTINGS ----------
-st.sidebar.subheader("📱 Screen Settings")
-screen_option = st.sidebar.selectbox(
+# ---------- SIMPLE SETTINGS ----------
+st.sidebar.subheader("⚙️ Settings")
+
+# Screen size - only mobile vertical options
+screen_size = st.sidebar.selectbox(
     "Screen Size",
-    ["Instagram Reels (1080x1920)", "TikTok (1080x1920)", "YouTube Shorts (1080x1920)", 
-     "Instagram Square (1080x1080)", "Custom Size"]
+    ["Fullscreen Mobile (1080x1920)", "Instagram Reels (1080x1920)", 
+     "TikTok (1080x1920)", "Stories (1080x1920)"]
 )
 
-if screen_option == "Instagram Reels (1080x1920)":
-    SCREEN_WIDTH, SCREEN_HEIGHT = 1080, 1920
-elif screen_option == "TikTok (1080x1920)":
-    SCREEN_WIDTH, SCREEN_HEIGHT = 1080, 1920
-elif screen_option == "YouTube Shorts (1080x1920)":
-    SCREEN_WIDTH, SCREEN_HEIGHT = 1080, 1920
-elif screen_option == "Instagram Square (1080x1080)":
-    SCREEN_WIDTH, SCREEN_HEIGHT = 1080, 1080
-else:
-    SCREEN_WIDTH = st.sidebar.number_input("Width", min_value=480, max_value=3840, value=1080)
-    SCREEN_HEIGHT = st.sidebar.number_input("Height", min_value=480, max_value=3840, value=1920)
+SCREEN_WIDTH, SCREEN_HEIGHT = 1080, 1920  # Always vertical mobile
 
-st.sidebar.info(f"Screen: {SCREEN_WIDTH} × {SCREEN_HEIGHT}")
+# Auto-detect option for mobile videos
+auto_detect = st.sidebar.checkbox("Auto-detect mobile videos", value=True, 
+                                  help="Automatically detect and fit mobile videos to fullscreen")
 
-# ---------- OVERLAY FIT OPTIONS ----------
-st.sidebar.subheader("🎨 Fit Options")
-fit_option = st.sidebar.radio(
-    "How to fit overlay on screen",
-    ["Fill Screen (Crop if needed)", "Fit Entire (Keep all content)", "Stretch to Fit"]
-)
+# Background color (only used if needed)
+bg_color = st.sidebar.color_picker("Background Color", "#000000")
 
 # ---------- PROCESS ----------
-if st.button("🎬 Create Fullscreen Video", type="primary") and background_file and overlay_file:
+if st.button("🎬 Create Mobile Video", type="primary", use_container_width=True) and background_file and overlay_file:
 
-    with st.spinner("Creating your fullscreen video..."):
+    with st.spinner("Creating your mobile video..."):
         
         # Save uploaded files
         def save_temp(upload, suffix=""):
@@ -103,7 +93,7 @@ if st.button("🎬 Create Fullscreen Video", type="primary") and background_file
         
         try:
             # ----- STEP 1: EXTRACT AUDIO -----
-            st.info("🎵 Extracting audio...")
+            st.info("🎵 Processing audio...")
             
             # Check if background is video
             is_video = background_file.type.startswith('video') or bg_ext in ['.mp4', '.mov', '.avi', '.mpeg', '.mkv']
@@ -112,82 +102,57 @@ if st.button("🎬 Create Fullscreen Video", type="primary") and background_file
                 video_clip = VideoFileClip(bg_path)
                 audio_clip = video_clip.audio
                 if audio_clip is None:
-                    st.error("❌ No audio found!")
+                    st.error("❌ No audio found in the video!")
                     st.stop()
+                video_clip.close()  # Close to free resources
             else:
                 audio_clip = AudioFileClip(bg_path)
             
             audio_duration = audio_clip.duration
-            st.info(f"Audio: {audio_duration:.1f} seconds")
+            st.info(f"Audio duration: {audio_duration:.1f} seconds")
             
-            # ----- STEP 2: PROCESS OVERLAY TO FIT SCREEN -----
-            st.info("🖼️ Processing overlay for fullscreen...")
+            # ----- STEP 2: PROCESS OVERLAY TO FILL SCREEN -----
+            st.info("🖼️ Preparing screen content...")
             
             # Check if overlay is image
             is_image = overlay_file.type.startswith('image') or overlay_ext in ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp']
             
             if is_image:
-                # Open image
+                # ----- IMAGE PROCESSING -----
                 img = Image.open(overlay_path)
                 img_width, img_height = img.size
-                st.info(f"Original image: {img_width} × {img_height}")
-                
-                # Calculate scaling based on fit option
+                img_ratio = img_width / img_height
                 screen_ratio = SCREEN_WIDTH / SCREEN_HEIGHT
-                image_ratio = img_width / img_height
                 
-                if fit_option == "Fill Screen (Crop if needed)":
-                    # Crop to fill screen completely
-                    if image_ratio > screen_ratio:
+                st.info(f"Image: {img_width}×{img_height} (ratio: {img_ratio:.2f})")
+                
+                # Decide how to fit based on aspect ratio
+                if auto_detect and abs(img_ratio - screen_ratio) < 0.1:
+                    # Image is already mobile aspect ratio - fill screen
+                    st.info("📱 Image is mobile aspect - filling screen")
+                    img = img.resize((SCREEN_WIDTH, SCREEN_HEIGHT), 
+                                    Image.Resampling.LANCZOS if hasattr(Image, 'Resampling') else Image.LANCZOS)
+                else:
+                    # Image is not mobile aspect - crop to fill
+                    st.info("✂️ Cropping to fill screen")
+                    if img_ratio > screen_ratio:
                         # Image is wider than screen - crop sides
                         new_height = img_height
                         new_width = int(img_height * screen_ratio)
                         left = (img_width - new_width) // 2
-                        top = 0
-                        right = left + new_width
-                        bottom = img_height
+                        img = img.crop((left, 0, left + new_width, new_height))
                     else:
                         # Image is taller than screen - crop top/bottom
                         new_width = img_width
                         new_height = int(img_width / screen_ratio)
-                        left = 0
                         top = (img_height - new_height) // 2
-                        right = img_width
-                        bottom = top + new_height
+                        img = img.crop((0, top, new_width, top + new_height))
                     
-                    # Crop image
-                    img = img.crop((left, top, right, bottom))
-                    img = img.resize((SCREEN_WIDTH, SCREEN_HEIGHT), 
-                                    Image.Resampling.LANCZOS if hasattr(Image, 'Resampling') else Image.LANCZOS)
-                    
-                elif fit_option == "Fit Entire (Keep all content)":
-                    # Fit entire image within screen (black bars)
-                    if image_ratio > screen_ratio:
-                        # Image is wider - fit to width
-                        new_width = SCREEN_WIDTH
-                        new_height = int(SCREEN_WIDTH / image_ratio)
-                    else:
-                        # Image is taller - fit to height
-                        new_height = SCREEN_HEIGHT
-                        new_width = int(SCREEN_HEIGHT * image_ratio)
-                    
-                    img = img.resize((new_width, new_height), 
-                                    Image.Resampling.LANCZOS if hasattr(Image, 'Resampling') else Image.LANCZOS)
-                    
-                    # Create new image with black background
-                    background = Image.new('RGB', (SCREEN_WIDTH, SCREEN_HEIGHT), (0, 0, 0))
-                    # Paste centered
-                    paste_x = (SCREEN_WIDTH - new_width) // 2
-                    paste_y = (SCREEN_HEIGHT - new_height) // 2
-                    background.paste(img, (paste_x, paste_y))
-                    img = background
-                    
-                else:  # "Stretch to Fit"
-                    # Stretch image to fill screen (distorts if aspect ratio differs)
+                    # Resize to screen size
                     img = img.resize((SCREEN_WIDTH, SCREEN_HEIGHT), 
                                     Image.Resampling.LANCZOS if hasattr(Image, 'Resampling') else Image.LANCZOS)
                 
-                # Save processed image
+                # Save image
                 temp_img = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
                 img.save(temp_img.name, "PNG", quality=95)
                 
@@ -195,91 +160,77 @@ if st.button("🎬 Create Fullscreen Video", type="primary") and background_file
                 overlay = ImageClip(temp_img.name, duration=audio_duration)
                 
             else:
-                # VIDEO OVERLAY
+                # ----- VIDEO PROCESSING -----
                 overlay = VideoFileClip(overlay_path)
                 orig_width, orig_height = overlay.size
-                st.info(f"Original video: {orig_width} × {orig_height}, {overlay.duration:.1f}s")
+                video_ratio = orig_width / orig_height
+                screen_ratio = SCREEN_WIDTH / SCREEN_HEIGHT
+                
+                st.info(f"Video: {orig_width}×{orig_height} (ratio: {video_ratio:.2f}), {overlay.duration:.1f}s")
                 
                 # Handle duration
                 if overlay.duration < audio_duration:
-                    # Loop video
+                    st.info("🔄 Looping video to match audio duration")
                     loops = int(audio_duration // overlay.duration) + 1
                     overlay = concatenate_videoclips([overlay] * loops)
                     overlay = overlay.subclip(0, audio_duration)
                 elif overlay.duration > audio_duration:
+                    st.info("✂️ Trimming video to match audio duration")
                     overlay = overlay.subclip(0, audio_duration)
                 
-                # Resize video based on fit option
-                screen_ratio = SCREEN_WIDTH / SCREEN_HEIGHT
-                video_ratio = orig_width / orig_height
-                
-                if fit_option == "Fill Screen (Crop if needed)":
-                    # Crop to fill
+                # Check if video is already mobile aspect ratio
+                if auto_detect and abs(video_ratio - screen_ratio) < 0.1:
+                    # Video is already mobile aspect - use as is
+                    st.info("📱 Video is mobile aspect - using fullscreen")
+                    if (orig_width, orig_height) != (SCREEN_WIDTH, SCREEN_HEIGHT):
+                        overlay = overlay.resize((SCREEN_WIDTH, SCREEN_HEIGHT))
+                else:
+                    # Video needs cropping to fill screen
+                    st.info("🎬 Cropping video to fill screen")
+                    
                     if video_ratio > screen_ratio:
-                        # Video wider than screen - crop sides
+                        # Video is wider than screen - crop sides
                         crop_width = int(orig_height * screen_ratio)
                         x_center = orig_width // 2
-                        overlay = overlay.crop(x1=x_center - crop_width//2, x2=x_center + crop_width//2)
+                        overlay = overlay.crop(x1=x_center - crop_width//2, 
+                                              x2=x_center + crop_width//2,
+                                              y1=0, y2=orig_height)
                     else:
-                        # Video taller than screen - crop top/bottom
+                        # Video is taller than screen - crop top/bottom
                         crop_height = int(orig_width / screen_ratio)
                         y_center = orig_height // 2
-                        overlay = overlay.crop(y1=y_center - crop_height//2, y2=y_center + crop_height//2)
+                        overlay = overlay.crop(x1=0, x2=orig_width,
+                                              y1=y_center - crop_height//2,
+                                              y2=y_center + crop_height//2)
                     
-                    overlay = overlay.resize((SCREEN_WIDTH, SCREEN_HEIGHT))
-                    
-                elif fit_option == "Fit Entire (Keep all content)":
-                    # Fit with black bars
-                    if video_ratio > screen_ratio:
-                        # Fit to width
-                        overlay = overlay.resize(width=SCREEN_WIDTH)
-                    else:
-                        # Fit to height
-                        overlay = overlay.resize(height=SCREEN_HEIGHT)
-                    
-                    # Create black background
-                    background = ColorClip((SCREEN_WIDTH, SCREEN_HEIGHT), color=(0, 0, 0), duration=overlay.duration)
-                    # Position overlay
-                    overlay = overlay.set_position('center')
-                    overlay = CompositeVideoClip([background, overlay], size=(SCREEN_WIDTH, SCREEN_HEIGHT))
-                    
-                else:  # "Stretch to Fit"
-                    # Stretch video
+                    # Resize to screen size
                     overlay = overlay.resize((SCREEN_WIDTH, SCREEN_HEIGHT))
             
-            # ----- STEP 3: ADD AUDIO TO OVERLAY -----
-            st.info("🎥 Adding audio...")
+            # ----- STEP 3: COMBINE WITH AUDIO -----
+            st.info("🎥 Finalizing video...")
             
-            # If overlay is already a CompositeVideoClip (from fit entire), extract the actual overlay
-            if isinstance(overlay, CompositeVideoClip):
-                # Get the actual video from composite
-                overlay_with_audio = overlay.set_audio(audio_clip)
-                final_video = overlay_with_audio
-            else:
-                # Regular overlay
-                overlay = overlay.set_audio(audio_clip)
-                final_video = overlay
-            
-            final_video = final_video.set_duration(audio_duration)
-            final_video = final_video.set_fps(FPS)
+            # Add audio to overlay
+            overlay = overlay.set_audio(audio_clip)
+            overlay = overlay.set_duration(audio_duration)
+            overlay = overlay.set_fps(FPS)
             
             # ----- STEP 4: SAVE VIDEO -----
             st.info("💾 Saving video...")
             
             output_path = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4").name
             
-            # Optimize for mobile
-            final_video.write_videofile(
+            # Write with mobile optimization
+            overlay.write_videofile(
                 output_path,
                 fps=FPS,
                 codec="libx264",
                 audio_codec="aac",
-                bitrate="10M",  # Higher bitrate for quality
+                bitrate="8M",  # Good quality for mobile
                 verbose=False,
                 logger=None,
                 threads=2,
-                preset='medium',
-                ffmpeg_params=['-movflags', '+faststart']  # For mobile playback
+                preset='fast',
+                ffmpeg_params=['-movflags', '+faststart']
             )
             
             # Cleanup temp files
@@ -294,7 +245,7 @@ if st.button("🎬 Create Fullscreen Video", type="primary") and background_file
                     except:
                         pass
             
-            st.success(f"✅ Fullscreen video created!")
+            st.success(f"✅ Mobile video created successfully!")
             
         except Exception as e:
             st.error(f"❌ Error: {str(e)}")
@@ -304,140 +255,131 @@ if st.button("🎬 Create Fullscreen Video", type="primary") and background_file
             st.stop()
     
     # ----- STEP 5: SHOW RESULT -----
-    st.subheader("📱 Your Fullscreen Video")
+    st.subheader("📱 Your Mobile Video")
     
-    # Show preview in phone frame
-    preview_width = min(400, SCREEN_WIDTH)
-    preview_height = int(preview_width * (SCREEN_HEIGHT / SCREEN_WIDTH))
-    
-    phone_frame_html = f"""
+    # Create phone preview
+    phone_html = """
     <div style="
-        width: {preview_width}px;
-        height: {preview_height}px;
-        margin: 20px auto;
-        border: 12px solid #222;
+        max-width: 300px;
+        margin: 0 auto;
+        padding: 20px;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
         border-radius: 40px;
-        overflow: hidden;
-        box-shadow: 0 10px 40px rgba(0,0,0,0.3);
-        background: black;
-        position: relative;
+        box-shadow: 0 20px 40px rgba(0,0,0,0.3);
     ">
     <div style="
-        position: absolute;
-        top: 0;
-        left: 50%;
-        transform: translateX(-50%);
-        width: 60px;
-        height: 6px;
-        background: #333;
-        border-radius: 0 0 10px 10px;
-    "></div>
+        background: #111;
+        border-radius: 30px;
+        padding: 10px;
+        box-shadow: inset 0 0 20px rgba(0,0,0,0.5);
+    ">
     """
-    st.markdown(phone_frame_html, unsafe_allow_html=True)
+    st.markdown(phone_html, unsafe_allow_html=True)
     
     # Video preview
     try:
         st.video(output_path)
     except:
-        st.info("💡 Preview below - download for full quality")
+        st.info("💡 Video preview - download for full quality")
     
-    st.markdown("</div>", unsafe_allow_html=True)
+    st.markdown("</div></div>", unsafe_allow_html=True)
     
-    # Video info
-    col_info1, col_info2 = st.columns(2)
-    with col_info1:
-        st.metric("Duration", f"{audio_duration:.1f}s")
-        st.metric("Resolution", f"{SCREEN_WIDTH}×{SCREEN_HEIGHT}")
-    with col_info2:
-        st.metric("Fit Mode", fit_option)
+    # Video stats
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("📏 Size", f"{SCREEN_WIDTH}×{SCREEN_HEIGHT}")
+    with col2:
+        st.metric("⏱️ Duration", f"{audio_duration:.1f}s")
+    with col3:
         file_size = os.path.getsize(output_path) / (1024 * 1024)
-        st.metric("File Size", f"{file_size:.1f} MB")
+        st.metric("📦 File Size", f"{file_size:.1f} MB")
     
-    # Download
+    # Download button
     with open(output_path, "rb") as f:
         st.download_button(
-            f"⬇ Download Fullscreen Video ({file_size:.1f} MB)",
+            "⬇ Download Mobile Video",
             f,
-            file_name=f"fullscreen_{SCREEN_WIDTH}x{SCREEN_HEIGHT}.mp4",
+            file_name="mobile_video.mp4",
             mime="video/mp4",
-            type="primary"
+            type="primary",
+            use_container_width=True
         )
+    
+    # Info about the video
+    with st.expander("📊 Video Details"):
+        if is_image:
+            st.write(f"**Image:** {overlay_file.name}")
+            st.write(f"**Original:** {img_width}×{img_height}")
+            st.write(f"**Processed:** {SCREEN_WIDTH}×{SCREEN_HEIGHT}")
+        else:
+            st.write(f"**Video:** {overlay_file.name}")
+            st.write(f"**Original:** {orig_width}×{orig_height}")
+            st.write(f"**Processed:** {SCREEN_WIDTH}×{SCREEN_HEIGHT}")
+            st.write(f"**Duration:** {overlay.duration:.1f}s")
+        st.write(f"**Audio:** {background_file.name}")
+        st.write(f"**Audio Duration:** {audio_duration:.1f}s")
 
 else:
     # Show instructions
     st.markdown("""
-    ## 📱 Create Fullscreen Mobile Videos
+    ## 🎯 How to Create Mobile Videos
     
-    ### How it works:
-    1. **Upload Background** - Any audio/video file (only audio used)
-    2. **Upload Overlay** - Image or video (will fill entire screen)
-    3. **Choose Fit Option** - How overlay fits on screen
-    4. **Click Create** - Get fullscreen mobile video
+    ### Simple 3-Step Process:
     
-    ### 🎨 Fit Options Explained:
-    - **Fill Screen** - Crops edges to fill screen completely
-    - **Fit Entire** - Shows entire content (black bars if needed)
-    - **Stretch to Fit** - Stretches to fill (may distort)
+    1. **🎵 Upload Audio**  
+       Any music file (MP3, WAV) or video (MP4, MOV)  
+       *Only the audio will be used*
     
-    ### 📱 Perfect for:
-    - Instagram Reels/TikTok
+    2. **📱 Upload Screen Content**  
+       Image or video to display  
+       *Will fill the entire mobile screen*
+    
+    3. **🎬 Click "Create Mobile Video"**  
+       Get a vertical mobile video
+    
+    ### ✨ Key Features:
+    - **Auto-detects mobile videos** - Fits them perfectly
+    - **Fills entire screen** - No empty borders
+    - **Vertical format** - Perfect for mobile
+    - **High quality** - Clear video and audio
+    
+    ### 📱 Perfect For:
+    - Instagram Reels & Stories
+    - TikTok videos
     - YouTube Shorts
-    - Instagram Stories
-    - Mobile wallpaper videos
+    - WhatsApp Status
+    - Mobile presentations
     """)
 
-# ---------- FIT OPTION VISUAL GUIDE ----------
-with st.expander("🎯 Visual Guide to Fit Options"):
-    col1, col2, col3 = st.columns(3)
+# ---------- TIPS ----------
+with st.expander("💡 Tips for Best Results"):
+    st.markdown("""
+    ### For Best Quality:
     
-    with col1:
-        st.markdown("### **Fill Screen**")
-        st.markdown("""
-        ```
-        ┌───────────┐
-        │███████████│
-        │████ IMG ██│ ← Crops edges
-        │███████████│
-        └───────────┘
-        ```
-        - Crops image if needed
-        - No empty space
-        - Best for social media
-        """)
+    **📱 Mobile Videos:**
+    - Upload vertical videos (9:16 aspect ratio)
+    - Use 1080x1920 or similar resolution
+    - Enable "Auto-detect mobile videos" in settings
     
-    with col2:
-        st.markdown("### **Fit Entire**")
-        st.markdown("""
-        ```
-        ┌───────────┐
-        │░░░░░░░░░░░│
-        │░░░ IMG ░░░│ ← Shows all content
-        │░░░░░░░░░░░│
-        └───────────┘
-        ```
-        - Shows everything
-        - May have black bars
-        - Good for photos
-        """)
+    **🖼️ Images:**
+    - Use vertical images (taller than wide)
+    - Minimum 1080x1920 pixels
+    - High quality JPG or PNG
     
-    with col3:
-        st.markdown("### **Stretch to Fit**")
-        st.markdown("""
-        ```
-        ┌───────────┐
-        │┌─┬─────┬─┐│
-        ││ │     │ ││ ← Stretches image
-        │└─┴─────┴─┘│
-        └───────────┘
-        ```
-        - Fills screen completely
-        - May distort image
-        - Use with caution
-        """)
+    **🎵 Audio:**
+    - MP3 files work best
+    - Keep under 5 minutes for quick processing
+    - Normalize audio volume beforehand
+    
+    **⚡ Processing Tips:**
+    - Smaller files process faster
+    - Close other browser tabs
+    - Use MP4 format for videos
+    """)
 
-# Cleanup output after 10 minutes
-@st.cache_resource(ttl=600)
-def cleanup_output():
+# Auto cleanup
+@st.cache_resource(ttl=300)
+def cleanup():
     if 'output_path' in locals() and os.path.exists(output_path):
         try:
             os.remove(output_path)
