@@ -1,4 +1,4 @@
-streamlit
-moviepy
-decorator
-imageio-ffmpeg
+streamlit==1.27.0
+moviepy==1.0.3
+decorator==4.4.2
+imageio-ffmpeg==0.4.9
