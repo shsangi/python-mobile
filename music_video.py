@@ -34,6 +34,8 @@ def patched_resizer(picture, newsize):
     else:  # Fallback
         resample_method = Image.ANTIALIAS
     
+    # Ensure newsize contains integers
+    newsize = (int(newsize[0]), int(newsize[1]))
     resized_pil = pilim.resize(newsize[::-1], resample_method)
     
     # Convert back to numpy array
@@ -110,6 +112,9 @@ if st.button("Create Video") and bg_file and overlay_file:
                 new_height = 400
                 new_width = int(original_width * (new_height / original_height))
                 
+                # Ensure width is at least 1
+                new_width = max(1, new_width)
+                
                 # Resize using modern Pillow method
                 if hasattr(Image, 'Resampling'):
                     resized_img = pil_img.resize((new_width, new_height), Image.Resampling.LANCZOS)
@@ -125,8 +130,12 @@ if st.button("Create Video") and bg_file and overlay_file:
                 
             else:
                 ov = VideoFileClip(ov_path)
-                # Resize overlay
-                ov = ov.resize(height=400)
+                # Resize overlay - ensure height is integer
+                target_height = 400
+                # Calculate width maintaining aspect ratio
+                aspect_ratio = ov.size[0] / ov.size[1]
+                target_width = int(target_height * aspect_ratio)
+                ov = ov.resize((target_width, target_height))
                 
                 # Match duration with background
                 if ov.duration > bg.duration:
@@ -158,15 +167,22 @@ if st.button("Create Video") and bg_file and overlay_file:
                 audio_codec="aac",
                 fps=TARGET_FPS,
                 threads=2,
-                logger=None  # Suppress verbose output
+                logger=None,  # Suppress verbose output
+                temp_audiofile=os.path.join(tempfile.gettempdir(), "temp_audio.m4a"),
+                remove_temp=True
             )
             
             # Clean up temp image file if it exists
             if 'temp_img_path' in locals() and os.path.exists(temp_img_path):
-                os.remove(temp_img_path)
+                try:
+                    os.remove(temp_img_path)
+                except:
+                    pass
                 
         except Exception as e:
             st.error(f"❌ Error creating video: {str(e)}")
+            import traceback
+            st.code(traceback.format_exc())
             st.info("Tip: Try using different file formats or smaller files.")
             st.stop()
         finally:
@@ -181,25 +197,22 @@ if st.button("Create Video") and bg_file and overlay_file:
     st.success("✅ Video created successfully")
     
     # Show video preview
-    st.video(output)
+    try:
+        st.video(output)
+    except:
+        st.info("Video preview unavailable. You can still download the file.")
     
     # Download button
-    with open(output, "rb") as f:
-        st.download_button(
-            "⬇ Download Video",
-            f,
-            file_name="final_video.mp4",
-            mime="video/mp4"
-        )
-    
-    # Clean up final output file after session
-    @st.cache_resource(ttl=300)  # Cache for 5 minutes
-    def cleanup_output():
-        if os.path.exists(output):
-            try:
-                os.remove(output)
-            except:
-                pass
+    try:
+        with open(output, "rb") as f:
+            st.download_button(
+                "⬇ Download Video",
+                f,
+                file_name="final_video.mp4",
+                mime="video/mp4"
+            )
+    except Exception as e:
+        st.error(f"Error preparing download: {str(e)}")
 
 # Optional: Add instructions
 with st.expander("ℹ️ How to use"):
