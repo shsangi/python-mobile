@@ -13,6 +13,7 @@ from moviepy.editor import (
     CompositeVideoClip,
     ColorClip
 )
+from PIL import Image  # Add this import
 
 # ---------- PAGE ----------
 st.set_page_config(page_title="Simple Video Maker", layout="centered")
