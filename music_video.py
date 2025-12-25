@@ -2,6 +2,7 @@ import streamlit as st
 import tempfile
 import os
 import numpy as np
+from PIL import Image
 
 import moviepy
 import decorator
@@ -14,35 +15,52 @@ from moviepy.editor import (
     CompositeVideoClip,
     ColorClip
 )
-from PIL import Image
-import moviepy.video.fx.resize as resize_module
 
-# ---------- PATCH MOVIEPY RESIZE FUNCTION ----------
-# Monkey-patch the resizer function in moviepy to use LANCZOS instead of ANTIALIAS
-def patched_resizer(picture, newsize):
-    """Resizes the picture using PIL."""
-    h, w = picture.shape[:2]
+# ---------- CUSTOM RESIZE FUNCTION ----------
+def resize_clip(clip, height=None, width=None):
+    """
+    Custom resize function that works around MoviePy's deprecated ANTIALIAS issue.
+    """
+    if height is None and width is None:
+        return clip
     
-    # Convert numpy array to PIL Image
-    pilim = Image.fromarray(picture)
+    # Get original dimensions
+    original_width, original_height = clip.size
     
-    # Use LANCZOS instead of ANTIALIAS
-    if hasattr(Image, 'Resampling'):  # Pillow 9.1.0+
-        resample_method = Image.Resampling.LANCZOS
-    elif hasattr(Image, 'LANCZOS'):  # Pillow < 9.1.0
-        resample_method = Image.LANCZOS
-    else:  # Fallback
-        resample_method = Image.ANTIALIAS
+    # Calculate new dimensions
+    if height is not None and width is not None:
+        new_width, new_height = width, height
+    elif height is not None:
+        new_height = height
+        new_width = int(original_width * (height / original_height))
+    else:  # width is not None
+        new_width = width
+        new_height = int(original_height * (width / original_width))
     
-    # Ensure newsize contains integers
-    newsize = (int(newsize[0]), int(newsize[1]))
-    resized_pil = pilim.resize(newsize[::-1], resample_method)
+    # Ensure dimensions are integers
+    new_width, new_height = int(new_width), int(new_height)
     
-    # Convert back to numpy array
-    return np.array(resized_pil)
-
-# Apply the patch
-resize_module.resizer = patched_resizer
+    # Create a custom transformation function
+    def transform_frame(frame):
+        # Convert numpy array to PIL Image
+        pil_img = Image.fromarray(frame)
+        
+        # Use modern resampling method
+        if hasattr(Image, 'Resampling'):
+            resample_method = Image.Resampling.LANCZOS
+        elif hasattr(Image, 'LANCZOS'):
+            resample_method = Image.LANCZOS
+        else:
+            resample_method = Image.ANTIALIAS
+        
+        # Resize the image
+        resized_img = pil_img.resize((new_width, new_height), resample_method)
+        
+        # Convert back to numpy array
+        return np.array(resized_img)
+    
+    # Apply the transformation to the clip
+    return clip.fl_image(transform_frame)
 
 # ---------- PAGE ----------
 st.set_page_config(page_title="Simple Video Maker", layout="centered")
@@ -90,9 +108,9 @@ if st.button("Create Video") and bg_file and overlay_file:
             if bg_file.type.startswith("video"):
                 bg = VideoFileClip(bg_path)
                 bg = bg.set_fps(TARGET_FPS)
-                # If background video is too short, loop it
-                if bg.duration < 5:  # Arbitrary minimum
-                    bg = bg.loop(duration=10)  # Loop to 10 seconds
+                # Resize background to target dimensions if needed
+                if bg.size != (WIDTH, HEIGHT):
+                    bg = resize_clip(bg, width=WIDTH, height=HEIGHT)
             else:
                 audio = AudioFileClip(bg_path)
                 bg = ColorClip(
@@ -118,8 +136,10 @@ if st.button("Create Video") and bg_file and overlay_file:
                 # Resize using modern Pillow method
                 if hasattr(Image, 'Resampling'):
                     resized_img = pil_img.resize((new_width, new_height), Image.Resampling.LANCZOS)
-                else:
+                elif hasattr(Image, 'LANCZOS'):
                     resized_img = pil_img.resize((new_width, new_height), Image.LANCZOS)
+                else:
+                    resized_img = pil_img.resize((new_width, new_height), Image.ANTIALIAS)
                 
                 # Save resized image to temp file
                 temp_img_path = os.path.join(tempfile.gettempdir(), "resized_overlay.png")
@@ -129,13 +149,11 @@ if st.button("Create Video") and bg_file and overlay_file:
                 ov = ImageClip(temp_img_path).set_duration(bg.duration)
                 
             else:
-                ov = VideoFileClip(ov_path)
-                # Resize overlay - ensure height is integer
-                target_height = 400
-                # Calculate width maintaining aspect ratio
-                aspect_ratio = ov.size[0] / ov.size[1]
-                target_width = int(target_height * aspect_ratio)
-                ov = ov.resize((target_width, target_height))
+                # Load video overlay
+                ov = VideoFileClip(ov_path).set_fps(TARGET_FPS)
+                
+                # Use custom resize function instead of MoviePy's built-in resize
+                ov = resize_clip(ov, height=400)
                 
                 # Match duration with background
                 if ov.duration > bg.duration:
@@ -160,14 +178,14 @@ if st.button("Create Video") and bg_file and overlay_file:
 
             output = os.path.join(tempfile.gettempdir(), "final_video.mp4")
             
-            # Write video file with error handling
+            # Write video file
             final.write_videofile(
                 output,
                 codec="libx264",
                 audio_codec="aac",
                 fps=TARGET_FPS,
                 threads=2,
-                logger=None,  # Suppress verbose output
+                logger=None,
                 temp_audiofile=os.path.join(tempfile.gettempdir(), "temp_audio.m4a"),
                 remove_temp=True
             )
