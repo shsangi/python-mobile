@@ -20,7 +20,7 @@ from moviepy.editor import (
 )
 
 # Add version tracking
-VERSION = "2.3.1"
+VERSION = "2.4.0"
 
 # ---------- PAGE ----------
 st.set_page_config(page_title="Fullscreen Video Maker", layout="centered")
@@ -50,6 +50,10 @@ if 'bg_is_video' not in st.session_state:
     st.session_state.bg_is_video = False
 if 'overlay_is_image' not in st.session_state:
     st.session_state.overlay_is_image = False
+if 'audio_range' not in st.session_state:
+    st.session_state.audio_range = (0.0, 0.0)
+if 'overlay_range' not in st.session_state:
+    st.session_state.overlay_range = (0.0, 0.0)
 
 # ---------- HELPER FUNCTIONS ----------
 def save_uploaded_file(uploaded_file):
@@ -142,6 +146,7 @@ with col1:
             st.session_state.bg_clip = None
             st.session_state.bg_audio_clip = None
             st.session_state.bg_preview_path = None
+            st.session_state.audio_range = (0.0, 0.0)
             st.session_state.prev_bg_file = background_file.name
         
         # Save file
@@ -162,6 +167,10 @@ with col1:
                 st.session_state.bg_audio_clip = AudioFileClip(st.session_state.bg_path)
             
             st.session_state.bg_duration = st.session_state.bg_audio_clip.duration
+            
+            # Initialize audio range to full duration
+            if st.session_state.audio_range == (0.0, 0.0):
+                st.session_state.audio_range = (0.0, st.session_state.bg_duration)
             
             # Generate preview if video
             if st.session_state.bg_is_video:
@@ -189,6 +198,7 @@ with col2:
         if 'prev_overlay_file' not in st.session_state or st.session_state.prev_overlay_file != overlay_file.name:
             st.session_state.overlay_clip = None
             st.session_state.overlay_preview_path = None
+            st.session_state.overlay_range = (0.0, 0.0)
             st.session_state.prev_overlay_file = overlay_file.name
         
         # Save file
@@ -206,6 +216,10 @@ with col2:
             else:
                 st.session_state.overlay_clip = VideoFileClip(st.session_state.overlay_path)
                 st.session_state.overlay_duration = st.session_state.overlay_clip.duration
+                
+                # Initialize overlay range to full duration
+                if st.session_state.overlay_range == (0.0, 0.0):
+                    st.session_state.overlay_range = (0.0, st.session_state.overlay_duration)
                 
                 # Generate preview
                 preview_end = min(3, st.session_state.overlay_duration)
@@ -228,115 +242,115 @@ if st.session_state.bg_duration > 0:
     audio_tab, overlay_tab = st.tabs(["🎵 Audio Settings", "🎬 Overlay Settings"])
     
     with audio_tab:
-        col_a1, col_a2 = st.columns(2)
-        
-        with col_a1:
-            st.markdown("**Audio Duration Selector**")
-            audio_start = st.slider(
-                "Start Time (seconds)",
+        if st.session_state.bg_duration > 0:
+            st.markdown("**🎵 Select Audio Range**")
+            
+            # Create a range slider for audio selection
+            audio_range = st.slider(
+                "Select start and end time (seconds)",
                 0.0,
                 st.session_state.bg_duration,
-                0.0,
+                st.session_state.audio_range,  # Use stored range
                 0.1,
-                key="audio_start",
-                help="Select start point for audio"
-            )
-        
-        with col_a2:
-            st.markdown("**Audio Duration Range**")
-            audio_end = st.slider(
-                "End Time (seconds)",
-                0.0,
-                st.session_state.bg_duration,
-                st.session_state.bg_duration,
-                0.1,
-                key="audio_end",
-                help="Select end point for audio"
-            )
-        
-        # Ensure end is after start
-        if audio_end <= audio_start:
-            audio_end = min(audio_start + 1, st.session_state.bg_duration)
-            st.warning(f"End time adjusted to {audio_end:.1f} seconds")
-        
-        audio_duration = audio_end - audio_start
-        st.info(f"**Selected audio duration: {audio_duration:.1f} seconds** (from {audio_start:.1f}s to {audio_end:.1f}s)")
-        
-        # Show audio waveform preview if available
-        if st.session_state.bg_is_video and st.session_state.bg_preview_path:
-            st.markdown("**Audio/Video Preview**")
-            
-            # Update preview based on selected time
-            preview_start = max(0, audio_start - 1)
-            preview_end = min(audio_start + 4, st.session_state.bg_duration)
-            
-            # Generate new preview for selected segment
-            temp_preview = generate_video_preview(
-                st.session_state.bg_path,
-                start_time=preview_start,
-                end_time=preview_end,
-                height=150
+                key="audio_range_slider",
+                help="Drag the handles to select start and end points"
             )
             
-            if temp_preview:
-                display_preview(
-                    temp_preview,
-                    "Background Preview",
-                    is_gif=True,
+            # Update session state
+            st.session_state.audio_range = audio_range
+            
+            audio_start, audio_end = audio_range
+            audio_duration = audio_end - audio_start
+            
+            # Show duration info in a nice box
+            col_a1, col_a2, col_a3 = st.columns(3)
+            with col_a1:
+                st.metric("Start Time", f"{audio_start:.1f}s")
+            with col_a2:
+                st.metric("End Time", f"{audio_end:.1f}s")
+            with col_a3:
+                st.metric("Duration", f"{audio_duration:.1f}s")
+            
+            # Show audio waveform preview if available
+            if st.session_state.bg_is_video and st.session_state.bg_preview_path:
+                st.markdown("**📹 Video Preview (Audio Source)**")
+                
+                # Generate preview for selected segment
+                preview_start = max(0, audio_start - 0.5)
+                preview_end = min(audio_start + 3.5, st.session_state.bg_duration)
+                
+                temp_preview = generate_video_preview(
+                    st.session_state.bg_path,
                     start_time=preview_start,
-                    end_time=preview_end
+                    end_time=preview_end,
+                    height=150
                 )
-                # Cleanup temp preview
-                try:
-                    os.unlink(temp_preview)
-                except:
-                    pass
+                
+                if temp_preview:
+                    display_preview(
+                        temp_preview,
+                        "Selected Audio Segment",
+                        is_gif=True,
+                        start_time=preview_start,
+                        end_time=preview_end
+                    )
+                    
+                    # Show where the selection is in the preview
+                    st.markdown(f"""
+                    <div style="background: #f0f2f6; padding: 10px; border-radius: 5px; margin: 10px 0;">
+                        <small>
+                        <strong>🎯 Selected Segment:</strong> {audio_start:.1f}s to {audio_end:.1f}s 
+                        | <strong>Duration:</strong> {audio_duration:.1f}s
+                        </small>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    
+                    # Cleanup temp preview
+                    try:
+                        os.unlink(temp_preview)
+                    except:
+                        pass
+            elif not st.session_state.bg_is_video:
+                st.info("🎵 Audio file loaded - no video preview available")
     
     with overlay_tab:
         if not st.session_state.overlay_is_image and st.session_state.overlay_duration > 0:
-            col_o1, col_o2 = st.columns(2)
+            st.markdown("**🎬 Select Overlay Video Range**")
             
-            with col_o1:
-                st.markdown("**Overlay Start Time**")
-                overlay_start = st.slider(
-                    "Start Time (seconds)",
-                    0.0,
-                    st.session_state.overlay_duration,
-                    0.0,
-                    0.1,
-                    key="overlay_start",
-                    help="Select start point for overlay video"
-                )
+            # Create a range slider for overlay selection
+            overlay_range = st.slider(
+                "Select start and end time for overlay (seconds)",
+                0.0,
+                st.session_state.overlay_duration,
+                st.session_state.overlay_range,  # Use stored range
+                0.1,
+                key="overlay_range_slider",
+                help="Drag the handles to select which part of the video to use"
+            )
             
-            with col_o2:
-                st.markdown("**Overlay End Time**")
-                overlay_end = st.slider(
-                    "End Time (seconds)",
-                    0.0,
-                    st.session_state.overlay_duration,
-                    st.session_state.overlay_duration,
-                    0.1,
-                    key="overlay_end",
-                    help="Select end point for overlay video"
-                )
+            # Update session state
+            st.session_state.overlay_range = overlay_range
             
-            # Ensure end is after start
-            if overlay_end <= overlay_start:
-                overlay_end = min(overlay_start + 1, st.session_state.overlay_duration)
-                st.warning(f"End time adjusted to {overlay_end:.1f} seconds")
-            
+            overlay_start, overlay_end = overlay_range
             overlay_selected_duration = overlay_end - overlay_start
-            st.info(f"**Selected overlay duration: {overlay_selected_duration:.1f} seconds** (from {overlay_start:.1f}s to {overlay_end:.1f}s)")
+            
+            # Show duration info
+            col_o1, col_o2, col_o3 = st.columns(3)
+            with col_o1:
+                st.metric("Start Time", f"{overlay_start:.1f}s")
+            with col_o2:
+                st.metric("End Time", f"{overlay_end:.1f}s")
+            with col_o3:
+                st.metric("Duration", f"{overlay_selected_duration:.1f}s")
             
             # Show overlay preview
             if st.session_state.overlay_preview_path:
-                st.markdown("**Overlay Preview**")
+                st.markdown("**📹 Overlay Video Preview**")
                 
-                # Update preview based on selected time
-                preview_start = max(0, overlay_start - 1)
-                preview_end = min(overlay_start + 4, st.session_state.overlay_duration)
+                # Generate preview for selected segment
+                preview_start = max(0, overlay_start - 0.5)
+                preview_end = min(overlay_start + 3.5, st.session_state.overlay_duration)
                 
-                # Generate new preview for selected segment
                 temp_preview = generate_video_preview(
                     st.session_state.overlay_path,
                     start_time=preview_start,
@@ -347,11 +361,22 @@ if st.session_state.bg_duration > 0:
                 if temp_preview:
                     display_preview(
                         temp_preview,
-                        "Overlay Preview",
+                        "Selected Overlay Segment",
                         is_gif=True,
                         start_time=preview_start,
                         end_time=preview_end
                     )
+                    
+                    # Show where the selection is in the preview
+                    st.markdown(f"""
+                    <div style="background: #f0f2f6; padding: 10px; border-radius: 5px; margin: 10px 0;">
+                        <small>
+                        <strong>🎯 Selected Segment:</strong> {overlay_start:.1f}s to {overlay_end:.1f}s 
+                        | <strong>Duration:</strong> {overlay_selected_duration:.1f}s
+                        </small>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    
                     # Cleanup temp preview
                     try:
                         os.unlink(temp_preview)
@@ -360,7 +385,7 @@ if st.session_state.bg_duration > 0:
         elif st.session_state.overlay_is_image:
             st.info("📸 Overlay is an image - duration will match audio")
             if st.session_state.overlay_preview_path:
-                st.markdown("**Image Preview**")
+                st.markdown("**🖼️ Image Preview**")
                 display_preview(st.session_state.overlay_preview_path, "Overlay Image", is_gif=False)
         else:
             st.info("Upload an overlay file to adjust duration")
@@ -398,10 +423,8 @@ fit_option = st.sidebar.radio(
 if st.button("🎬 Create Fullscreen Video", type="primary") and background_file and overlay_file:
     
     # Get selected durations from session state
-    audio_start = st.session_state.get('audio_start', 0)
-    audio_end = st.session_state.get('audio_end', st.session_state.bg_duration)
-    overlay_start = st.session_state.get('overlay_start', 0)
-    overlay_end = st.session_state.get('overlay_end', st.session_state.overlay_duration)
+    audio_start, audio_end = st.session_state.audio_range
+    overlay_start, overlay_end = st.session_state.overlay_range
     
     with st.spinner("Creating your fullscreen video..."):
         
@@ -490,10 +513,10 @@ if st.button("🎬 Create Fullscreen Video", type="primary") and background_file
                 # VIDEO OVERLAY - Use the already loaded clip
                 overlay = st.session_state.overlay_clip
                 
-                # Trim overlay if needed
+                # Trim overlay to selected range
                 overlay = overlay.subclip(overlay_start, overlay_end)
                 overlay_duration = overlay.duration
-                st.info(f"Overlay trimmed to: {overlay_duration:.1f} seconds")
+                st.info(f"Overlay trimmed to: {overlay_duration:.1f} seconds (from {overlay_start:.1f}s to {overlay_end:.1f}s)")
                 
                 orig_width, orig_height = overlay.size
                 st.info(f"Original video: {orig_width} × {orig_height}, {overlay.duration:.1f}s")
@@ -672,15 +695,15 @@ else:
     ## 📱 Create Fullscreen Mobile Videos
     
     ### New Features:
-    1. **🎵 Audio Selection** - Select start and end points for background audio/video
-    2. **🎬 Overlay Trimming** - Trim video overlays to specific segments
-    3. **👀 Visual Previews** - See what part of your media is selected
-    4. **⏱️ Duration Control** - Fine-tune exact timing for both audio and video
+    1. **🎵 Single Range Slider** - Select start and end time with one slider
+    2. **🎬 Visual Timeline Selection** - See exactly what you're selecting
+    3. **👀 Real-time Previews** - Watch previews of selected segments
+    4. **⏱️ Easy Duration Control** - Simple drag handles to adjust timing
     
     ### How it works:
     1. **Upload Background** - Any audio/video file (only audio used)
     2. **Upload Overlay** - Image or video (will fill entire screen)
-    3. **Adjust Durations** - Use sliders to select exact segments
+    3. **Drag to Select** - Use range sliders to choose segments
     4. **Choose Fit Option** - How overlay fits on screen
     5. **Click Create** - Get fullscreen mobile video
     
