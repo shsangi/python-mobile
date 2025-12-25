@@ -5,6 +5,7 @@ import numpy as np
 from PIL import Image
 from io import BytesIO
 import base64
+import math
 
 import moviepy
 import decorator
@@ -20,7 +21,7 @@ from moviepy.editor import (
 )
 
 # Add version tracking
-VERSION = "2.4.0"
+VERSION = "2.4.1"
 
 # ---------- PAGE ----------
 st.set_page_config(page_title="Fullscreen Video Maker", layout="centered")
@@ -75,8 +76,17 @@ def generate_video_preview(video_path, start_time=0, end_time=None, height=200):
         start_time = max(0, min(start_time, clip.duration - 0.1))
         end_time = max(start_time + 0.1, min(end_time, clip.duration))
         
+        # Calculate dimensions ensuring integers
+        clip_height = int(clip.h)  # Ensure integer
+        clip_width = int(clip.w)   # Ensure integer
+        
+        # Calculate aspect ratio
+        aspect_ratio = clip_width / clip_height
+        new_height = int(height)
+        new_width = int(new_height * aspect_ratio)
+        
         preview_clip = clip.subclip(start_time, end_time)
-        preview_clip = preview_clip.resize(height=height)
+        preview_clip = preview_clip.resize((new_width, new_height))
         
         # Create temp file for GIF
         temp_gif = tempfile.NamedTemporaryFile(delete=False, suffix=".gif")
@@ -407,8 +417,8 @@ elif screen_option == "YouTube Shorts (1080x1920)":
 elif screen_option == "Instagram Square (1080x1080)":
     SCREEN_WIDTH, SCREEN_HEIGHT = 1080, 1080
 else:
-    SCREEN_WIDTH = st.sidebar.number_input("Width", min_value=480, max_value=3840, value=1080)
-    SCREEN_HEIGHT = st.sidebar.number_input("Height", min_value=480, max_value=3840, value=1920)
+    SCREEN_WIDTH = st.sidebar.number_input("Width", min_value=480, max_value=3840, value=1080, step=1)
+    SCREEN_HEIGHT = st.sidebar.number_input("Height", min_value=480, max_value=3840, value=1920, step=1)
 
 st.sidebar.info(f"Screen: {SCREEN_WIDTH} × {SCREEN_HEIGHT}")
 
@@ -519,12 +529,14 @@ if st.button("🎬 Create Fullscreen Video", type="primary") and background_file
                 st.info(f"Overlay trimmed to: {overlay_duration:.1f} seconds (from {overlay_start:.1f}s to {overlay_end:.1f}s)")
                 
                 orig_width, orig_height = overlay.size
+                orig_width = int(orig_width)
+                orig_height = int(orig_height)
                 st.info(f"Original video: {orig_width} × {orig_height}, {overlay.duration:.1f}s")
                 
                 # Handle duration matching
                 if overlay.duration < audio_duration:
                     # Loop video
-                    loops = int(audio_duration // overlay.duration) + 1
+                    loops = int(math.ceil(audio_duration / overlay.duration))
                     overlay_loops = [overlay] * loops
                     overlay = concatenate_videoclips(overlay_loops)
                     overlay = overlay.subclip(0, audio_duration)
@@ -701,7 +713,7 @@ else:
     4. **⏱️ Easy Duration Control** - Simple drag handles to adjust timing
     
     ### How it works:
-    1. **Upload Background** - Any audio/video file (only audio used)
+    1. **Upload Background** - Any audio/video file (only audio will be used)
     2. **Upload Overlay** - Image or video (will fill entire screen)
     3. **Drag to Select** - Use range sliders to choose segments
     4. **Choose Fit Option** - How overlay fits on screen
