@@ -156,12 +156,15 @@ st.divider()
 if st.button("🎬 Create Video", type="primary", disabled=not (bg and ov), use_container_width=True):
     try:
         with st.spinner("Processing video..."):
+            st.write("🔄 Step 1: Extracting audio...")
             # Extract audio
             audio_src = clip if is_vid else AudioFileClip(bg_path)
             audio = audio_src.audio.subclip(*st.session_state.a_trim) if is_vid else audio_src.subclip(*st.session_state.a_trim)
             dur = audio.duration
+            st.write(f"✅ Audio extracted: {dur:.1f}s")
             
             # Process overlay
+            st.write("🔄 Step 2: Processing overlay...")
             if is_img:
                 img_arr = np.array(img)
                 img_dur = min(st.session_state.img_dur, dur)
@@ -169,29 +172,80 @@ if st.button("🎬 Create Video", type="primary", disabled=not (bg and ov), use_
                 if img_dur < dur:
                     bg_clip = ColorClip(size=ov_final.size, color=(0,0,0), duration=dur)
                     ov_final = CompositeVideoClip([bg_clip, ov_final.set_position('center')], duration=dur)
+                st.write(f"✅ Image overlay ready: {ov_final.size}")
             else:
                 ov_final = ov_clip.subclip(*st.session_state.v_trim)
+                st.write(f"✅ Video trimmed: {ov_final.size}")
                 
                 # Apply rotation if needed
                 rotation = st.session_state.rotation
-                if rotation == 90:
-                    ov_final = ov_final.rotate(-90)
-                elif rotation == 270:
-                    ov_final = ov_final.rotate(90)
-                elif rotation == 180:
-                    ov_final = ov_final.rotate(180)
+                if rotation != 0:
+                    st.write(f"🔄 Applying rotation: {rotation}°...")
+                    if rotation == 90:
+                        ov_final = ov_final.rotate(-90)
+                    elif rotation == 270:
+                        ov_final = ov_final.rotate(90)
+                    elif rotation == 180:
+                        ov_final = ov_final.rotate(180)
+                    st.write(f"✅ Rotation applied: {ov_final.size}")
                 
                 if ov_final.duration < dur:
+                    st.write("🔄 Looping video to match audio...")
                     loops = int(dur / ov_final.duration) + 1
                     ov_final = concatenate_videoclips([ov_final] * loops).subclip(0, dur)
                 elif ov_final.duration > dur:
                     ov_final = ov_final.subclip(0, dur)
+                st.write(f"✅ Duration matched: {ov_final.duration:.1f}s")
             
             # Apply target dimensions if selected
             if target_dims:
-                ov_final = resize_video_to_fit(ov_final, target_dims)
+                st.write(f"🔄 Step 3: Resizing to {target_dims[0]}×{target_dims[1]}...")
+                st.write(f"Original size: {ov_final.size}")
+                
+                target_w, target_h = target_dims
+                clip_w, clip_h = ov_final.size
+                
+                # Calculate scaling
+                scale = min(target_w / clip_w, target_h / clip_h)
+                new_w, new_h = int(clip_w * scale), int(clip_h * scale)
+                
+                # Make dimensions even
+                new_w = new_w if new_w % 2 == 0 else new_w - 1
+                new_h = new_h if new_h % 2 == 0 else new_h - 1
+                
+                st.write(f"Calculated new size: {new_w}×{new_h}")
+                st.write(f"Resizing clip...")
+                
+                try:
+                    # Try method 1: using newsize
+                    resized = ov_final.resize(newsize=(new_w, new_h))
+                    st.write("✅ Resize successful (method 1)")
+                except Exception as e1:
+                    st.write(f"⚠️ Method 1 failed: {e1}")
+                    try:
+                        # Try method 2: using width/height
+                        resized = ov_final.resize(width=new_w, height=new_h)
+                        st.write("✅ Resize successful (method 2)")
+                    except Exception as e2:
+                        st.write(f"⚠️ Method 2 failed: {e2}")
+                        # Try method 3: using fx
+                        from moviepy.video.fx.resize import resize as fx_resize
+                        resized = fx_resize(ov_final, newsize=(new_w, new_h))
+                        st.write("✅ Resize successful (method 3)")
+                
+                st.write("🔄 Creating black background...")
+                bg_clip = ColorClip(size=target_dims, color=(0, 0, 0), duration=ov_final.duration)
+                
+                st.write("🔄 Compositing video...")
+                x_pos = (target_w - new_w) // 2
+                y_pos = (target_h - new_h) // 2
+                ov_final = CompositeVideoClip([bg_clip, resized.set_position((x_pos, y_pos))], size=target_dims)
+                st.write(f"✅ Resize complete: {ov_final.size}")
             
+            st.write("🔄 Step 4: Adding audio...")
             final = ov_final.set_audio(audio).set_duration(dur)
+            
+            st.write("🔄 Step 5: Rendering video...")
             out = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4").name
             
             ffmpeg_params = ['-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2']
@@ -248,6 +302,6 @@ if st.button("🎬 Create Video", type="primary", disabled=not (bg and ov), use_
             pass
         
     except Exception as e:
-        st.error(f"Error: {e}")
+        st.error(f"❌ Error: {e}")
         import traceback
         st.code(traceback.format_exc())
