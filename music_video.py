@@ -12,10 +12,10 @@ from moviepy.editor import (
     ImageClip,
     concatenate_videoclips
 )
-
+my_title = "Video maker v 2:3" #update on any change
 # ---------- PAGE CONFIG ----------
 st.set_page_config(
-    page_title="Video Maker V 2:3", #update on any change
+    page_title=my_title, 
     layout="centered",
     initial_sidebar_state="collapsed"
 )
@@ -34,7 +34,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ---------- APP TITLE ----------
-st.title("🎬 Video Maker V 2:1")
+st.title(my_title)
 st.caption("Trim audio and overlay videos - No resizing")
 
 # ---------- SESSION STATE ----------
