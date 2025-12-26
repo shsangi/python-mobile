@@ -20,7 +20,7 @@ from moviepy.editor import (
 )
 
 # Add version tracking
-VERSION = "2.3.3"  # Updated version
+VERSION = "2.3.4"  # Updated version
 
 # ---------- PAGE ----------
 st.set_page_config(page_title="Fullscreen Video Maker", layout="centered")
@@ -68,11 +68,16 @@ def generate_video_preview(video_path, start_time=0, end_time=None, height=200):
             end_time = min(clip.duration, start_time + 3)
         
         # Ensure valid time range
-        start_time = max(0, min(start_time, clip.duration - 0.1))
-        end_time = max(start_time + 0.1, min(end_time, clip.duration))
+        start_time = float(max(0, min(start_time, clip.duration - 0.1)))
+        end_time = float(max(start_time + 0.1, min(end_time, clip.duration)))
         
         preview_clip = clip.subclip(start_time, end_time)
-        preview_clip = preview_clip.resize(height=int(height))  # Ensure integer height
+        
+        # Convert height to integer explicitly
+        height_int = int(float(height))
+        
+        # Resize with integer height
+        preview_clip = preview_clip.resize(height=height_int)
         
         # Create temp file for GIF
         temp_gif = tempfile.NamedTemporaryFile(delete=False, suffix=".gif")
@@ -93,8 +98,9 @@ def generate_image_preview(image_path, max_size=(300, 300)):
     try:
         img = Image.open(image_path)
         # Ensure integer dimensions
-        max_size = (int(max_size[0]), int(max_size[1]))
-        img.thumbnail(max_size)
+        max_width = int(float(max_size[0]))
+        max_height = int(float(max_size[1]))
+        img.thumbnail((max_width, max_height))
         
         temp_img = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
         img.save(temp_img.name, format='PNG')
@@ -163,7 +169,7 @@ with col1:
                 st.session_state.bg_clip = None
                 st.session_state.bg_audio_clip = AudioFileClip(st.session_state.bg_path)
             
-            st.session_state.bg_duration = float(st.session_state.bg_audio_clip.duration)  # Ensure float
+            st.session_state.bg_duration = float(st.session_state.bg_audio_clip.duration)
             
             # Generate preview if video
             if st.session_state.bg_is_video:
@@ -171,7 +177,8 @@ with col1:
                 st.session_state.bg_preview_path = generate_video_preview(
                     st.session_state.bg_path, 
                     start_time=0.0, 
-                    end_time=preview_end
+                    end_time=preview_end,
+                    height=200
                 )
             
             st.success(f"✅ Loaded: {background_file.name} ({st.session_state.bg_duration:.1f}s)")
@@ -207,14 +214,15 @@ with col2:
                 st.session_state.overlay_preview_path = generate_image_preview(st.session_state.overlay_path)
             else:
                 st.session_state.overlay_clip = VideoFileClip(st.session_state.overlay_path)
-                st.session_state.overlay_duration = float(st.session_state.overlay_clip.duration)  # Ensure float
+                st.session_state.overlay_duration = float(st.session_state.overlay_clip.duration)
                 
                 # Generate preview
                 preview_end = min(3.0, st.session_state.overlay_duration)
                 st.session_state.overlay_preview_path = generate_video_preview(
                     st.session_state.overlay_path,
                     start_time=0.0,
-                    end_time=preview_end
+                    end_time=preview_end,
+                    height=200
                 )
             
             st.success(f"✅ Loaded: {overlay_file.name}")
@@ -237,7 +245,7 @@ if st.session_state.bg_duration > 0:
             audio_start = st.slider(
                 "Start Time (seconds)",
                 0.0,
-                float(st.session_state.bg_duration),  # Ensure float
+                float(st.session_state.bg_duration),
                 0.0,
                 0.1,
                 key="audio_start",
@@ -249,8 +257,8 @@ if st.session_state.bg_duration > 0:
             audio_end = st.slider(
                 "End Time (seconds)",
                 0.0,
-                float(st.session_state.bg_duration),  # Ensure float
-                float(st.session_state.bg_duration),  # Ensure float
+                float(st.session_state.bg_duration),
+                float(st.session_state.bg_duration),
                 0.1,
                 key="audio_end",
                 help="Select end point for audio"
@@ -263,36 +271,6 @@ if st.session_state.bg_duration > 0:
         
         audio_duration = audio_end - audio_start
         st.info(f"**Selected audio duration: {audio_duration:.1f} seconds** (from {audio_start:.1f}s to {audio_end:.1f}s)")
-        
-        # Show audio waveform preview if available
-        if st.session_state.bg_is_video and st.session_state.bg_preview_path:
-            st.markdown("**Audio/Video Preview**")
-            
-            # Update preview based on selected time
-            preview_start = max(0.0, audio_start - 1.0)
-            preview_end = min(audio_start + 4.0, float(st.session_state.bg_duration))
-            
-            # Generate new preview for selected segment
-            temp_preview = generate_video_preview(
-                st.session_state.bg_path,
-                start_time=preview_start,
-                end_time=preview_end,
-                height=150
-            )
-            
-            if temp_preview:
-                display_preview(
-                    temp_preview,
-                    "Background Preview",
-                    is_gif=True,
-                    start_time=preview_start,
-                    end_time=preview_end
-                )
-                # Cleanup temp preview
-                try:
-                    os.unlink(temp_preview)
-                except:
-                    pass
     
     with overlay_tab:
         if not st.session_state.overlay_is_image and st.session_state.overlay_duration > 0:
@@ -303,7 +281,7 @@ if st.session_state.bg_duration > 0:
                 overlay_start = st.slider(
                     "Start Time (seconds)",
                     0.0,
-                    float(st.session_state.overlay_duration),  # Ensure float
+                    float(st.session_state.overlay_duration),
                     0.0,
                     0.1,
                     key="overlay_start",
@@ -315,8 +293,8 @@ if st.session_state.bg_duration > 0:
                 overlay_end = st.slider(
                     "End Time (seconds)",
                     0.0,
-                    float(st.session_state.overlay_duration),  # Ensure float
-                    float(st.session_state.overlay_duration),  # Ensure float
+                    float(st.session_state.overlay_duration),
+                    float(st.session_state.overlay_duration),
                     0.1,
                     key="overlay_end",
                     help="Select end point for overlay video"
@@ -329,43 +307,6 @@ if st.session_state.bg_duration > 0:
             
             overlay_selected_duration = overlay_end - overlay_start
             st.info(f"**Selected overlay duration: {overlay_selected_duration:.1f} seconds** (from {overlay_start:.1f}s to {overlay_end:.1f}s)")
-            
-            # Show overlay preview
-            if st.session_state.overlay_preview_path:
-                st.markdown("**Overlay Preview**")
-                
-                # Update preview based on selected time
-                preview_start = max(0.0, overlay_start - 1.0)
-                preview_end = min(overlay_start + 4.0, float(st.session_state.overlay_duration))
-                
-                # Generate new preview for selected segment
-                temp_preview = generate_video_preview(
-                    st.session_state.overlay_path,
-                    start_time=preview_start,
-                    end_time=preview_end,
-                    height=150
-                )
-                
-                if temp_preview:
-                    display_preview(
-                        temp_preview,
-                        "Overlay Preview",
-                        is_gif=True,
-                        start_time=preview_start,
-                        end_time=preview_end
-                    )
-                    # Cleanup temp preview
-                    try:
-                        os.unlink(temp_preview)
-                    except:
-                        pass
-        elif st.session_state.overlay_is_image:
-            st.info("📸 Overlay is an image - duration will match audio")
-            if st.session_state.overlay_preview_path:
-                st.markdown("**Image Preview**")
-                display_preview(st.session_state.overlay_preview_path, "Overlay Image", is_gif=False)
-        else:
-            st.info("Upload an overlay file to adjust duration")
 
 # ---------- MOBILE SCREEN SETTINGS ----------
 st.sidebar.subheader("📱 Screen Settings")
@@ -423,7 +364,7 @@ if st.button("🎬 Create Fullscreen Video", type="primary") and background_file
             
             # Create subclip for audio
             audio_clip = st.session_state.bg_audio_clip.subclip(audio_start, audio_end)
-            audio_duration = float(audio_clip.duration)  # Ensure float
+            audio_duration = float(audio_clip.duration)
             st.info(f"Audio: {audio_duration:.1f} seconds (from {audio_start:.1f}s to {audio_end:.1f}s)")
             
             # ----- STEP 2: PROCESS OVERLAY -----
@@ -433,7 +374,7 @@ if st.button("🎬 Create Fullscreen Video", type="primary") and background_file
                 # Open image
                 img = Image.open(st.session_state.overlay_path)
                 img_width, img_height = img.size
-                img_width, img_height = int(img_width), int(img_height)  # Ensure integers
+                img_width, img_height = int(img_width), int(img_height)
                 st.info(f"Original image: {img_width} × {img_height}")
                 
                 # Calculate scaling based on fit option
@@ -459,7 +400,7 @@ if st.button("🎬 Create Fullscreen Video", type="primary") and background_file
                         right = img_width
                         bottom = top + new_height
                     
-                    # Crop image (ensure integer coordinates)
+                    # Ensure integer coordinates
                     left, top, right, bottom = int(left), int(top), int(right), int(bottom)
                     img = img.crop((left, top, right, bottom))
                     img = img.resize((SCREEN_WIDTH, SCREEN_HEIGHT), 
@@ -476,13 +417,13 @@ if st.button("🎬 Create Fullscreen Video", type="primary") and background_file
                         new_height = SCREEN_HEIGHT
                         new_width = int(float(SCREEN_HEIGHT) * image_ratio)
                     
-                    new_width, new_height = int(new_width), int(new_height)  # Ensure integers
+                    new_width, new_height = int(new_width), int(new_height)
                     img = img.resize((new_width, new_height), 
                                     Image.Resampling.LANCZOS if hasattr(Image, 'Resampling') else Image.LANCZOS)
                     
                     # Create new image with black background
                     background = Image.new('RGB', (SCREEN_WIDTH, SCREEN_HEIGHT), (0, 0, 0))
-                    # Paste centered (ensure integer coordinates)
+                    # Paste centered
                     paste_x = int((SCREEN_WIDTH - new_width) // 2)
                     paste_y = int((SCREEN_HEIGHT - new_height) // 2)
                     background.paste(img, (paste_x, paste_y))
@@ -505,19 +446,19 @@ if st.button("🎬 Create Fullscreen Video", type="primary") and background_file
                 # VIDEO OVERLAY - Use the already loaded clip
                 overlay = st.session_state.overlay_clip
                 
-                # Trim overlay if needed
-                overlay = overlay.subclip(overlay_start, overlay_end)
-                overlay_duration = float(overlay.duration)  # Ensure float
+                # Trim overlay if needed (ensure float times)
+                overlay = overlay.subclip(float(overlay_start), float(overlay_end))
+                overlay_duration = float(overlay.duration)
                 st.info(f"Overlay trimmed to: {overlay_duration:.1f} seconds")
                 
                 orig_width, orig_height = overlay.size
-                orig_width, orig_height = int(orig_width), int(orig_height)  # Ensure integers
+                orig_width, orig_height = int(orig_width), int(orig_height)
                 st.info(f"Original video: {orig_width} × {orig_height}, {overlay.duration:.1f}s")
                 
                 # Handle duration matching
                 if overlay_duration < audio_duration:
                     # Loop video
-                    loops = int(np.ceil(audio_duration / overlay_duration))  # Use numpy ceil
+                    loops = int(np.ceil(audio_duration / overlay_duration))
                     overlay_loops = []
                     for _ in range(loops):
                         overlay_loops.append(overlay.copy())
@@ -539,13 +480,20 @@ if st.button("🎬 Create Fullscreen Video", type="primary") and background_file
                         # Video wider than screen - crop sides
                         crop_width = int(float(orig_height) * screen_ratio)
                         x_center = orig_width // 2
-                        overlay = overlay.crop(x1=x_center - crop_width//2, x2=x_center + crop_width//2)
+                        # Ensure integer crop coordinates
+                        x1 = int(x_center - crop_width//2)
+                        x2 = int(x_center + crop_width//2)
+                        overlay = overlay.crop(x1=x1, x2=x2)
                     else:
                         # Video taller than screen - crop top/bottom
                         crop_height = int(float(orig_width) / screen_ratio)
                         y_center = orig_height // 2
-                        overlay = overlay.crop(y1=y_center - crop_height//2, y2=y_center + crop_height//2)
+                        # Ensure integer crop coordinates
+                        y1 = int(y_center - crop_height//2)
+                        y2 = int(y_center + crop_height//2)
+                        overlay = overlay.crop(y1=y1, y2=y2)
                     
+                    # Ensure integer dimensions for resize
                     overlay = overlay.resize((int(SCREEN_WIDTH), int(SCREEN_HEIGHT)))
                     
                 elif fit_option == "Fit Entire (Keep all content)":
@@ -557,14 +505,14 @@ if st.button("🎬 Create Fullscreen Video", type="primary") and background_file
                         # Fit to height
                         overlay = overlay.resize(height=int(SCREEN_HEIGHT))
                     
-                    # Create black background
+                    # Create black background with integer dimensions
                     background = ColorClip((int(SCREEN_WIDTH), int(SCREEN_HEIGHT)), color=(0, 0, 0), duration=overlay.duration)
                     # Position overlay
                     overlay = overlay.set_position('center')
                     overlay = CompositeVideoClip([background, overlay], size=(int(SCREEN_WIDTH), int(SCREEN_HEIGHT)))
                     
                 else:  # "Stretch to Fit"
-                    # Stretch video
+                    # Stretch video with integer dimensions
                     overlay = overlay.resize((int(SCREEN_WIDTH), int(SCREEN_HEIGHT)))
             
             # ----- STEP 3: ADD AUDIO TO OVERLAY -----
@@ -702,12 +650,6 @@ else:
     st.markdown("""
     ## 📱 Create Fullscreen Mobile Videos
     
-    ### New Features:
-    1. **🎵 Audio Selection** - Select start and end points for background audio/video
-    2. **🎬 Overlay Trimming** - Trim video overlays to specific segments
-    3. **👀 Visual Previews** - See what part of your media is selected
-    4. **⏱️ Duration Control** - Fine-tune exact timing for both audio and video
-    
     ### How it works:
     1. **Upload Background** - Any audio/video file (only audio used)
     2. **Upload Overlay** - Image or video (will fill entire screen)
@@ -726,55 +668,6 @@ else:
     - Instagram Stories with trimmed videos
     - Mobile wallpaper videos
     """)
-
-# ---------- FIT OPTION VISUAL GUIDE ----------
-with st.expander("🎯 Visual Guide to Fit Options"):
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        st.markdown("### **Fill Screen**")
-        st.markdown("""
-        ```
-        ┌───────────┐
-        │███████████│
-        │████ IMG ██│ ← Crops edges
-        │███████████│
-        └───────────┘
-        ```
-        - Crops image if needed
-        - No empty space
-        - Best for social media
-        """)
-    
-    with col2:
-        st.markdown("### **Fit Entire**")
-        st.markdown("""
-        ```
-        ┌───────────┐
-        │░░░░░░░░░░░│
-        │░░░ IMG ░░░│ ← Shows all content
-        │░░░░░░░░░░░│
-        └───────────┘
-        ```
-        - Shows everything
-        - May have black bars
-        - Good for photos
-        """)
-    
-    with col3:
-        st.markdown("### **Stretch to Fit**")
-        st.markdown("""
-        ```
-        ┌───────────┐
-        │┌─┬─────┬─┐│
-        ││ │     │ ││ ← Stretches image
-        │└─┴─────┴─┘│
-        └───────────┘
-        ```
-        - Fills screen completely
-        - May distort image
-        - Use with caution
-        """)
 
 # ---------- CLEANUP FUNCTION ----------
 def cleanup_resources():
