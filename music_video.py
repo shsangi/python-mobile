@@ -4,15 +4,17 @@ import os
 import gc
 from PIL import Image
 import base64
+import numpy as np
 
 import moviepy
 from moviepy.editor import (
     VideoFileClip,
     AudioFileClip,
     ImageClip,
-    concatenate_videoclips
+    concatenate_videoclips,
+    CompositeVideoClip
 )
-my_title = "🎬 Mobile Video Maker V 22" #update version with any change by adding 1
+my_title = "🎬 Mobile Video Maker V 23" #update version with any change by adding 1
 # ---------- PAGE CONFIG ----------
 st.set_page_config(
     page_title= my_title,
@@ -39,7 +41,7 @@ st.markdown("""
 
 # ---------- APP TITLE ----------
 st.title(my_title)
-st.caption("Trim audio and overlay videos - No resizing | Single slider for easy trimming")
+st.caption("Combine audio with video or image overlays - No resizing | Single slider for easy trimming")
 
 # ---------- SESSION STATE ----------
 session_defaults = {
@@ -51,10 +53,12 @@ session_defaults = {
     'overlay_path': None,
     'bg_is_video': False,
     'overlay_is_image': False,
+    'overlay_image': None,
     'prev_bg_file': None,
     'prev_overlay_file': None,
     'audio_trim_values': [0.0, 30.0],  # Default: start=0, end=30
-    'overlay_trim_values': [0.0, 30.0]  # Default: start=0, end=30
+    'overlay_trim_values': [0.0, 30.0],  # Default: start=0, end=30
+    'image_duration': 5.0  # Default duration for images
 }
 
 for key, value in session_defaults.items():
@@ -146,40 +150,59 @@ with col1:
 
 with col2:
     overlay_file = st.file_uploader(
-        "Overlay Video",
-        type=["mp4", "mov"],
-        help="Video overlay (will not be resized)"
+        "Overlay (Video or Image)",
+        type=["mp4", "mov", "jpg", "jpeg", "png", "gif"],
+        help="Video overlay or static image (will not be resized)"
     )
     
     if overlay_file:
         if st.session_state.prev_overlay_file != overlay_file.name:
             st.session_state.overlay_clip = None
+            st.session_state.overlay_image = None
             st.session_state.prev_overlay_file = overlay_file.name
         
         # Save and load
         with st.spinner("Loading overlay..."):
             st.session_state.overlay_path = save_uploaded_file(overlay_file)
-            st.session_state.overlay_is_image = False
+            file_ext = os.path.splitext(overlay_file.name)[1].lower()
+            st.session_state.overlay_is_image = file_ext in ['.jpg', '.jpeg', '.png', '.gif']
             
             try:
-                st.session_state.overlay_clip = VideoFileClip(st.session_state.overlay_path, audio=False)
-                st.session_state.overlay_duration = st.session_state.overlay_clip.duration
-                # Reset trim values to full duration (max 30 seconds or actual duration)
-                max_end = min(30.0, st.session_state.overlay_duration)
-                st.session_state.overlay_trim_values = [0.0, max_end]
-                st.success(f"✅ Overlay: {overlay_file.name} ({st.session_state.overlay_duration:.1f}s)")
-                
-                # Show preview
-                preview_img = show_single_frame_preview(st.session_state.overlay_path)
-                if preview_img:
-                    st.image(preview_img, caption="Overlay preview", use_column_width=True)
+                if st.session_state.overlay_is_image:
+                    # Load image
+                    st.session_state.overlay_image = Image.open(st.session_state.overlay_path)
+                    st.session_state.overlay_duration = 0  # Images don't have duration
+                    st.success(f"✅ Image: {overlay_file.name}")
                     
+                    # Show preview
+                    img_preview = st.session_state.overlay_image.copy()
+                    img_preview.thumbnail((300, 300))
+                    st.image(img_preview, caption="Image preview", use_column_width=True)
+                    
+                    # Set default image duration
+                    if st.session_state.bg_duration > 0:
+                        st.session_state.image_duration = min(30.0, st.session_state.bg_duration)
+                    
+                else:
+                    # Load video
+                    st.session_state.overlay_clip = VideoFileClip(st.session_state.overlay_path, audio=False)
+                    st.session_state.overlay_duration = st.session_state.overlay_clip.duration
+                    # Reset trim values to full duration (max 30 seconds or actual duration)
+                    max_end = min(30.0, st.session_state.overlay_duration)
+                    st.session_state.overlay_trim_values = [0.0, max_end]
+                    st.success(f"✅ Video: {overlay_file.name} ({st.session_state.overlay_duration:.1f}s)")
+                    
+                    # Show preview
+                    preview_img = show_single_frame_preview(st.session_state.overlay_path)
+                    if preview_img:
+                        st.image(preview_img, caption="Video preview", use_column_width=True)
+                        
             except Exception as e:
                 st.error(f"Error: {str(e)}")
 
-# ---------- SINGLE RANGE SLIDERS FOR TRIM ----------
+# ---------- TRIM SETTINGS ----------
 if st.session_state.bg_duration > 0:
-    st.subheader("Trim Settings")
+    st.subheader("Audio Settings")
     
     # Single range slider for audio trim
     st.markdown("**Audio Selection**")
@@ -219,9 +242,10 @@ if st.session_state.bg_duration > 0:
     # Visual timeline
     st.progress(audio_end / max_duration, text=f"Selected: {audio_duration:.1f}s of {max_duration:.1f}s total")
 
-if st.session_state.overlay_duration > 0:
-    # Single range slider for overlay trim
-    st.markdown("**Overlay Video Selection**")
+# ---------- OVERLAY SETTINGS (ONLY FOR VIDEO) ----------
+if st.session_state.overlay_duration > 0 and not st.session_state.overlay_is_image:
+    # Single range slider for video overlay trim
+    st.subheader("Video Overlay Settings")
     st.caption("Drag the handles to select start and end time for video")
     
     # Get max duration for slider
@@ -258,13 +282,40 @@ if st.session_state.overlay_duration > 0:
     # Visual timeline
     st.progress(overlay_end / max_overlay_duration, text=f"Selected: {overlay_duration_val:.1f}s of {max_overlay_duration:.1f}s total")
 
-# ---------- PROCESS FUNCTION (NO RESIZING) ----------
-def process_video_no_resize():
-    """Combine audio and video without any resizing"""
+# ---------- IMAGE OVERLAY SETTINGS ----------
+elif st.session_state.overlay_is_image and st.session_state.bg_duration > 0:
+    st.subheader("Image Overlay Settings")
+    
+    # For images, only show duration setting
+    st.markdown("**Image Display Duration**")
+    st.caption("How long the image should appear in the video")
+    
+    # Set max duration based on audio selection
+    audio_start, audio_end = st.session_state.audio_trim_values
+    max_image_duration = audio_end - audio_start
+    
+    # Image duration slider
+    image_duration = st.slider(
+        "Image duration (seconds)",
+        min_value=1.0,
+        max_value=float(max_image_duration),
+        value=min(30.0, float(max_image_duration)),
+        step=0.5,
+        format="%.1f s",
+        key="image_duration_slider",
+        help=f"How long to display the image (max: {max_image_duration:.1f}s)"
+    )
+    
+    st.session_state.image_duration = image_duration
+    
+    st.info(f"Image will be displayed for {format_time(image_duration)} alongside the audio.")
+
+# ---------- PROCESS FUNCTION (WITH IMAGE SUPPORT) ----------
+def process_video_with_image():
+    """Combine audio with video or image overlay without any resizing"""
     try:
-        # Get trim values from range sliders
+        # Get audio trim values
         audio_start, audio_end = st.session_state.get('audio_trim_values', [0.0, 30.0])
-        overlay_start, overlay_end = st.session_state.get('overlay_trim_values', [0.0, 30.0])
         
         # Extract audio
         with st.spinner("Extracting audio..."):
@@ -276,23 +327,57 @@ def process_video_no_resize():
         
         final_audio_duration = audio_clip.duration
         
-        # Process overlay video (NO RESIZING)
+        # Process overlay (Video or Image)
         with st.spinner("Processing overlay..."):
-            # Trim overlay
-            overlay = st.session_state.overlay_clip.subclip(overlay_start, overlay_end)
+            if st.session_state.overlay_is_image:
+                # ----- PROCESS IMAGE OVERLAY -----
+                # Create video clip from image
+                img_array = np.array(st.session_state.overlay_image)
+                
+                # Use image duration from slider
+                image_duration = st.session_state.image_duration
+                
+                # Ensure image doesn't exceed audio duration
+                if image_duration > final_audio_duration:
+                    image_duration = final_audio_duration
+                
+                # Create image clip
+                overlay = ImageClip(img_array, duration=image_duration)
+                
+                # If image is shorter than audio, create black background for remaining time
+                if image_duration < final_audio_duration:
+                    # Create black background for the full duration
+                    from moviepy.video.VideoClip import ColorClip
+                    bg_clip = ColorClip(size=overlay.size, color=(0, 0, 0), duration=final_audio_duration)
+                    
+                    # Composite image on top of black background
+                    overlay = overlay.set_position(('center', 'center'))
+                    final_video = CompositeVideoClip([bg_clip, overlay], duration=final_audio_duration)
+                else:
+                    final_video = overlay
+                
+            else:
+                # ----- PROCESS VIDEO OVERLAY -----
+                # Get video trim values
+                overlay_start, overlay_end = st.session_state.get('overlay_trim_values', [0.0, 30.0])
+                
+                # Trim overlay video
+                overlay = st.session_state.overlay_clip.subclip(overlay_start, overlay_end)
+                
+                # Match durations - loop overlay if shorter than audio
+                if overlay.duration < final_audio_duration:
+                    loops_needed = int(final_audio_duration / overlay.duration) + 1
+                    overlay_loops = [overlay] * loops_needed
+                    overlay = concatenate_videoclips(overlay_loops)
+                    overlay = overlay.subclip(0, final_audio_duration)
+                elif overlay.duration > final_audio_duration:
+                    overlay = overlay.subclip(0, final_audio_duration)
+                
+                # NO RESIZING - keep original dimensions
+                final_video = overlay
             
-            # Match durations - loop overlay if shorter than audio
-            if overlay.duration < final_audio_duration:
-                loops_needed = int(final_audio_duration / overlay.duration) + 1
-                overlay_loops = [overlay] * loops_needed
-                overlay = concatenate_videoclips(overlay_loops)
-                overlay = overlay.subclip(0, final_audio_duration)
-            elif overlay.duration > final_audio_duration:
-                overlay = overlay.subclip(0, final_audio_duration)
-            
-            # NO RESIZING - keep original dimensions
-            # Just add the audio
-            final_video = overlay.set_audio(audio_clip)
+            # Add audio to final video
+            final_video = final_video.set_audio(audio_clip)
             final_video = final_video.set_duration(final_audio_duration)
         
         # Save video
@@ -300,11 +385,16 @@ def process_video_no_resize():
             output_path = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4").name
             
             # Get original dimensions
-            width, height = overlay.size
+            width, height = final_video.size
+            
+            # Set appropriate fps
+            fps = 30
+            if not st.session_state.overlay_is_image:
+                fps = overlay.fps if hasattr(overlay, 'fps') else 30
             
             final_video.write_videofile(
                 output_path,
-                fps=overlay.fps if hasattr(overlay, 'fps') else 30,
+                fps=fps,
                 codec="libx264",
                 audio_codec="aac",
                 bitrate="8M",
@@ -316,7 +406,8 @@ def process_video_no_resize():
         
         # Cleanup
         audio_clip.close()
-        overlay.close()
+        if hasattr(overlay, 'close'):
+            overlay.close()
         final_video.close()
         
         return output_path, final_audio_duration, width, height
@@ -344,7 +435,7 @@ if st.button("🎬 Create Final Video",
         st.stop()
     
     # Process video
-    output_path, duration, width, height = process_video_no_resize()
+    output_path, duration, width, height = process_video_with_image()
     
     if output_path and os.path.exists(output_path):
         st.success("✅ Video created successfully!")
@@ -360,6 +451,8 @@ if st.button("🎬 Create Final Video",
         # Show info
         file_size = os.path.getsize(output_path) / (1024 * 1024)
         
+        overlay_type = "Image" if st.session_state.overlay_is_image else "Video"
+        
         col1, col2, col3 = st.columns(3)
         with col1:
             st.metric("Duration", f"{duration:.1f}s")
@@ -368,12 +461,16 @@ if st.button("🎬 Create Final Video",
         with col3:
             st.metric("Size", f"{file_size:.1f}MB")
         
+        # Display overlay type
+        st.info(f"Overlay type: {overlay_type}")
+        
         # Download button
         with open(output_path, "rb") as f:
+            file_label = "image" if st.session_state.overlay_is_image else "video"
             st.download_button(
-                "📥 Download Video",
+                f"📥 Download {overlay_type} Video",
                 f,
-                file_name=f"trimmed_video_{width}x{height}.mp4",
+                file_name=f"combined_{file_label}_overlay_{width}x{height}.mp4",
                 mime="video/mp4",
                 type="primary",
                 use_container_width=True
@@ -389,7 +486,7 @@ if st.button("🎬 Create Final Video",
             pass
         
         # Clear session
-        for key in ['bg_path', 'overlay_path', 'bg_clip', 'overlay_clip']:
+        for key in ['bg_path', 'overlay_path', 'bg_clip', 'overlay_clip', 'overlay_image']:
             if key in st.session_state:
                 st.session_state[key] = None
         
@@ -398,31 +495,37 @@ if st.button("🎬 Create Final Video",
 # ---------- INSTRUCTIONS ----------
 with st.expander("📖 How to Use", expanded=True):
     st.markdown("""
-    ### Simple Video Trimmer
+    ### Audio + Video/Image Combiner
     
     **What this does:**
     1. Takes audio from your background file (MP3/MP4)
-    2. Takes video from your overlay file (MP4/MOV)
-    3. Trims both using single range sliders (easy to use!)
-    4. Combines them WITHOUT resizing
-    5. Outputs the video with original dimensions
+    2. Takes video OR image from your overlay file
+    3. Trims audio using single slider
+    4. For videos: Trims video using single slider
+    5. For images: Sets display duration
+    6. Combines them WITHOUT resizing
+    7. Outputs the video with original dimensions
     
     **Steps:**
-    1. **Upload Background** - Any audio or video file
-    2. **Upload Overlay** - Video file (will not be resized)
+    1. **Upload Background** - Any audio or video file with audio
+    2. **Upload Overlay** - Video (MP4/MOV) or Image (JPG/PNG/GIF)
     3. **Trim Audio** - Use the single slider to select start AND end time
-    4. **Trim Video** - Use the single slider to select start AND end time
-    5. **Click Create** - Get your combined video
+    4. **If Video Overlay:** Trim video with the single slider
+    5. **If Image Overlay:** Set how long to display the image
+    6. **Click Create** - Get your combined video
     
-    **Easy Trimming:**
-    - Each slider has TWO handles (left and right)
-    - Drag LEFT handle to set start time
-    - Drag RIGHT handle to set end time
-    - See timeline preview below each slider
+    **Features:**
+    - **Video Overlay:** Can be trimmed with range slider
+    - **Image Overlay:** Static image displayed for selected duration
+    - **No Resizing:** Original dimensions preserved
+    - **Mobile Friendly:** Single sliders for easy trimming
     
-    **Note:** Videos keep their original size - no resizing or black borders.
+    **Note:** 
+    - Videos keep their original size - no resizing or black borders
+    - Images are centered on black background
+    - Image duration cannot exceed selected audio duration
     """)
 
 # ---------- FOOTER ----------
 st.divider()
-st.caption("Video Trimmer • No resizing • Single slider trimming • Keep original dimensions")
+st.caption("Video/Image Combiner • No resizing • Single slider trimming • Keep original dimensions")
