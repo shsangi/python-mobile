@@ -2,153 +2,142 @@ import streamlit as st
 import tempfile
 import os
 import gc
+import numpy as np
 from PIL import Image
 import base64
-import time
+import traceback
+from typing import Tuple, Optional
 
 import moviepy
 from moviepy.editor import (
     VideoFileClip,
     AudioFileClip,
     ImageClip,
-    concatenate_videoclips
+    concatenate_videoclips,
+    CompositeVideoClip,
+    ColorClip
 )
+from moviepy.video.fx.all import resize, crop
 
-# ---------- VERSION ----------
-APP_VERSION = "21.1"  # Update with each change
-my_title = f"🎬 Mobile Video Maker V {APP_VERSION}"
+# ---------- APP CONFIG ----------
+APP_VERSION = "2.0"  # Updated for mobile-first design
+APP_TITLE = f"📱 Mobile Video Generator v{APP_VERSION}"
+MOBILE_RESOLUTIONS = {
+    "Portrait 9:16 (Standard)": (1080, 1920),
+    "Portrait 3:4 (Instagram)": (1080, 1440),
+    "Portrait 10:16 (Tall)": (1080, 1728),
+    "Portrait 2:3 (Story)": (1080, 1620),
+    "Custom": "custom"
+}
 
-# ---------- PAGE CONFIG (MOBILE OPTIMIZED) ----------
+# ---------- PAGE CONFIG ----------
 st.set_page_config(
-    page_title=my_title,
-    layout="wide",  # Changed to wide for better mobile control
+    page_title=APP_TITLE,
+    layout="wide",
     initial_sidebar_state="collapsed",
-    menu_items=None
+    menu_items={
+        'Get Help': None,
+        'Report a bug': None,
+        'About': f"Mobile Video Generator v{APP_VERSION} - Create portrait videos optimized for mobile devices"
+    }
 )
 
 # ---------- MOBILE-FRIENDLY CSS ----------
 st.markdown("""
 <style>
-    /* Hide sidebar completely */
+    /* Hide sidebar */
     [data-testid="stSidebar"] {
-        display: none !important;
+        display: none;
     }
     
-    /* Mobile-responsive container */
-    .main .block-container {
-        padding-top: 1rem;
-        padding-bottom: 1rem;
-        max-width: 100% !important;
-    }
-    
-    /* Mobile-friendly buttons */
+    /* Mobile-optimized buttons */
     .stButton > button {
         width: 100%;
-        min-height: 3rem;
-        font-size: 1.1rem;
-        border-radius: 0.5rem;
-        margin: 0.5rem 0;
+        height: 3em;
+        font-size: 16px !important;
+        border-radius: 10px;
+        margin: 5px 0;
     }
     
-    /* Mobile-friendly sliders */
-    .stSlider > div {
-        padding: 0.5rem 0;
+    /* Mobile-friendly input fields */
+    .stFileUploader > div > div {
+        padding: 10px;
+        border-radius: 10px;
     }
     
-    /* Mobile upload buttons */
-    .stFileUploader > div > button {
-        min-height: 2.5rem;
-        width: 100%;
+    /* Better slider for mobile */
+    .stSlider {
+        padding: 10px 0;
     }
     
-    /* Mobile column adjustments */
-    @media (max-width: 768px) {
-        .stColumn {
-            padding: 0.25rem !important;
-        }
-        
-        h1 {
-            font-size: 1.8rem !important;
-        }
-        
-        h2 {
-            font-size: 1.4rem !important;
-        }
-        
-        h3 {
-            font-size: 1.2rem !important;
-        }
-        
-        /* Prevent horizontal scrolling */
-        .element-container {
-            overflow-x: hidden !important;
-        }
-        
-        /* Mobile video preview */
-        .stVideo {
-            width: 100% !important;
-            height: auto !important;
-        }
-        
-        /* Metric cards for mobile */
-        .stMetric {
-            padding: 0.5rem !important;
-        }
+    /* Mobile-friendly columns */
+    .stColumn {
+        padding: 0 5px;
     }
     
-    /* Touch-friendly elements */
-    .stSlider > div > div > div {
-        height: 1.5rem !important;
+    /* Video player responsive */
+    .stVideo {
+        border-radius: 15px;
+        overflow: hidden;
+        margin: 10px 0;
     }
     
-    /* Mobile file uploader text */
-    .stFileUploader > div > label {
-        font-size: 0.9rem !important;
+    /* Metric cards */
+    .stMetric {
+        background-color: rgba(240, 242, 246, 0.5);
+        padding: 10px;
+        border-radius: 10px;
+        margin: 5px 0;
     }
     
-    /* Prevent zoom on input focus for iOS */
-    @media screen and (max-width: 768px) {
-        input, select, textarea {
-            font-size: 16px !important;
-        }
-    }
-    
-    /* Loading spinner adjustments */
-    .stSpinner > div {
-        margin: 1rem auto;
-    }
-    
-    /* Mobile expander */
+    /* Expandable sections */
     .streamlit-expanderHeader {
-        font-size: 1rem !important;
-        padding: 0.75rem !important;
+        font-size: 18px !important;
+        padding: 15px !important;
+    }
+    
+    /* Hide Streamlit branding for mobile */
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    
+    /* Touch-friendly controls */
+    .stSlider > div > div > div {
+        height: 8px;
+    }
+    
+    .stSlider > div > div > div > div {
+        height: 20px;
+        width: 20px;
+    }
+    
+    /* Progress bar */
+    .stProgress > div > div > div {
+        background-color: #FF4B4B;
+    }
+    
+    @media only screen and (max-width: 768px) {
+        /* Mobile-specific adjustments */
+        .stApp {
+            padding: 10px;
+        }
+        h1 {
+            font-size: 24px !important;
+        }
+        h2 {
+            font-size: 20px !important;
+        }
+        h3 {
+            font-size: 18px !important;
+        }
     }
 </style>
 """, unsafe_allow_html=True)
 
 # ---------- APP TITLE ----------
-st.title(my_title)
-st.caption("Trim audio and overlay videos - No resizing - Mobile Optimized")
+st.title(APP_TITLE)
+st.caption("🎯 Create perfect portrait videos for mobile - All dimensions supported")
 
-# ---------- MOBILE DETECTION & WARNINGS ----------
-def check_mobile_issues():
-    """Check for common mobile browser issues"""
-    warning_messages = []
-    
-    # Check if on mobile (simplified detection)
-    user_agent = st.experimental_get_query_params().get('agent', [''])[0]
-    is_mobile = 'mobi' in user_agent.lower() or any(x in user_agent.lower() 
-                                                   for x in ['iphone', 'android', 'mobile'])
-    
-    if is_mobile:
-        warning_messages.append("📱 **Mobile Browser Detected**")
-        warning_messages.append("- Use landscape mode for better video preview")
-        warning_messages.append("- Large files may take longer to process")
-        warning_messages.append("- Ensure stable internet connection")
-    
-    return warning_messages
-
-# ---------- SESSION STATE WITH MOBILE OPTIMIZATIONS ----------
+# ---------- SESSION STATE ----------
 session_defaults = {
     'bg_clip': None,
     'overlay_clip': None,
@@ -160,103 +149,179 @@ session_defaults = {
     'overlay_is_image': False,
     'prev_bg_file': None,
     'prev_overlay_file': None,
-    'mobile_warnings_shown': False,
-    'processing': False,
-    'last_output_path': None,
-    'mobile_orientation': 'portrait'
+    'selected_resolution': list(MOBILE_RESOLUTIONS.keys())[0],
+    'custom_width': 1080,
+    'custom_height': 1920,
+    'fit_mode': 'cover',  # 'cover', 'contain', 'stretch'
+    'bg_color': '#000000',
+    'output_path': None
 }
 
 for key, value in session_defaults.items():
     if key not in st.session_state:
         st.session_state[key] = value
 
-# ---------- MOBILE-OPTIMIZED HELPER FUNCTIONS ----------
-def save_uploaded_file(uploaded_file):
-    """Save uploaded file to temp location with mobile optimizations"""
-    try:
-        # Check file size for mobile limitations
-        file_size_mb = len(uploaded_file.getvalue()) / (1024 * 1024)
-        if file_size_mb > 100:  # 100MB limit for mobile
-            st.warning(f"⚠️ Large file ({file_size_mb:.1f}MB). Processing may be slow on mobile.")
-        
-        temp_file = tempfile.NamedTemporaryFile(
-            delete=False, 
-            suffix=os.path.splitext(uploaded_file.name)[1]
-        )
-        temp_file.write(uploaded_file.getvalue())
-        temp_file.close()
-        return temp_file.name
-    except Exception as e:
-        st.error(f"File save error: {str(e)}")
-        return None
+# ---------- MOBILE-SPECIFIC FUNCTIONS ----------
+def detect_mobile_browser() -> bool:
+    """Detect if user is accessing from mobile browser"""
+    user_agent = st.request.headers.get('User-Agent', '').lower()
+    mobile_keywords = ['mobile', 'android', 'iphone', 'ipad', 'tablet']
+    return any(keyword in user_agent for keyword in mobile_keywords)
 
-def show_single_frame_preview(video_path, time_point=1, mobile_optimized=True):
-    """Show a single frame from video, optimized for mobile"""
+def save_uploaded_file_mobile(uploaded_file, max_size_mb: int = 500):
+    """Save uploaded file with mobile-friendly optimizations"""
+    # Check file size for mobile constraints
+    file_size = len(uploaded_file.getvalue()) / (1024 * 1024)
+    if file_size > max_size_mb:
+        st.warning(f"⚠️ File size ({file_size:.1f}MB) exceeds recommended limit ({max_size_mb}MB) for mobile processing")
+        if detect_mobile_browser():
+            st.info("For better performance on mobile, please use files under 100MB")
+    
+    temp_file = tempfile.NamedTemporaryFile(
+        delete=False, 
+        suffix=os.path.splitext(uploaded_file.name)[1]
+    )
+    temp_file.write(uploaded_file.getvalue())
+    temp_file.close()
+    return temp_file.name
+
+def get_mobile_resolution() -> Tuple[int, int]:
+    """Get selected mobile resolution"""
+    if st.session_state.selected_resolution == "Custom":
+        return (st.session_state.custom_width, st.session_state.custom_height)
+    else:
+        return MOBILE_RESOLUTIONS[st.session_state.selected_resolution]
+
+def create_mobile_compatible_video(original_clip, target_width: int, target_height: int, fit_mode: str, bg_color: str) -> VideoFileClip:
+    """Resize and format video for mobile portrait display"""
+    
+    # Get original dimensions
+    orig_width, orig_height = original_clip.size
+    orig_ratio = orig_width / orig_height
+    target_ratio = target_width / target_height
+    
+    if fit_mode == 'stretch':
+        # Simply stretch to target resolution
+        resized_clip = resize(original_clip, (target_width, target_height))
+        return resized_clip
+    
+    elif fit_mode == 'cover':
+        # Crop to fill entire frame (no black bars)
+        if orig_ratio > target_ratio:
+            # Original is wider, crop height
+            new_height = orig_height
+            new_width = int(target_ratio * new_height)
+        else:
+            # Original is taller, crop width
+            new_width = orig_width
+            new_height = int(new_width / target_ratio)
+        
+        # Calculate crop position (center)
+        x_center = orig_width / 2
+        y_center = orig_height / 2
+        
+        cropped_clip = crop(
+            original_clip,
+            x1=int(x_center - new_width/2),
+            y1=int(y_center - new_height/2),
+            width=new_width,
+            height=new_height
+        )
+        
+        # Resize to target
+        resized_clip = resize(cropped_clip, (target_width, target_height))
+        return resized_clip
+    
+    else:  # 'contain' mode
+        # Fit within frame with letterbox/pillarbox
+        if orig_ratio > target_ratio:
+            # Fit to width
+            new_width = target_width
+            new_height = int(new_width / orig_ratio)
+        else:
+            # Fit to height
+            new_height = target_height
+            new_width = int(new_height * orig_ratio)
+        
+        # Resize maintaining aspect ratio
+        resized_clip = resize(original_clip, (new_width, new_height))
+        
+        # Create background color clip
+        background = ColorClip(
+            size=(target_width, target_height),
+            color=[int(bg_color[i:i+2], 16) for i in (1, 3, 5)]
+        ).set_duration(resized_clip.duration)
+        
+        # Calculate position (center)
+        x_pos = (target_width - new_width) // 2
+        y_pos = (target_height - new_height) // 2
+        
+        # Composite video on background
+        final_clip = CompositeVideoClip([
+            background,
+            resized_clip.set_position((x_pos, y_pos))
+        ])
+        
+        return final_clip
+
+def optimize_for_mobile_export(clip, target_resolution: Tuple[int, int]) -> VideoFileClip:
+    """Apply mobile-specific optimizations for export"""
+    # Ensure portrait orientation
+    width, height = clip.size
+    if width > height:
+        # Landscape detected - rotate if needed
+        st.warning("⚠️ Landscape video detected. Auto-rotating for portrait mobile display.")
+        clip = clip.rotate(90)
+        width, height = clip.size
+    
+    # Apply mobile-friendly encoding settings
+    clip = clip.set_fps(min(clip.fps, 60))  # Cap at 60fps for mobile
+    return clip
+
+def show_mobile_preview(video_path: str, resolution: Tuple[int, int]) -> Optional[Image.Image]:
+    """Show preview optimized for mobile display"""
     try:
         clip = VideoFileClip(video_path, audio=False)
-        if time_point > clip.duration:
-            time_point = clip.duration / 2
         
-        frame = clip.get_frame(time_point)
+        # Get frame at 25% duration
+        preview_time = clip.duration * 0.25
+        if preview_time > clip.duration:
+            preview_time = clip.duration / 2
+        
+        frame = clip.get_frame(preview_time)
         img = Image.fromarray(frame)
         
-        # Mobile-optimized thumbnail size
-        if mobile_optimized:
-            max_size = (400, 400)  # Smaller for mobile
-        else:
-            max_size = (600, 600)
+        # Resize preview for mobile display
+        preview_width, preview_height = resolution
+        if preview_width > 400:  # Limit preview size for mobile
+            scale = 400 / preview_width
+            preview_width = int(preview_width * scale)
+            preview_height = int(preview_height * scale)
         
-        img.thumbnail(max_size, Image.Resampling.LANCZOS)
+        img.thumbnail((preview_width, preview_height))
         
         clip.close()
         return img
     except Exception as e:
-        st.error(f"Preview error: {str(e)}")
+        st.warning(f"Preview generation failed: {str(e)}")
         return None
 
-def cleanup_temp_files():
-    """Clean up temporary files to free memory (important for mobile)"""
-    files_to_clean = [
-        st.session_state.bg_path,
-        st.session_state.overlay_path,
-        st.session_state.last_output_path
-    ]
-    
-    for file_path in files_to_clean:
-        if file_path and os.path.exists(file_path):
-            try:
-                os.unlink(file_path)
-            except:
-                pass
-    
-    # Force garbage collection
-    gc.collect()
+# ---------- MOBILE-FRIENDLY UI LAYOUT ----------
+# Detect mobile browser
+is_mobile = detect_mobile_browser()
+if is_mobile:
+    st.info("📱 Mobile browser detected - Interface optimized for touch")
 
-# ---------- MOBILE WARNINGS ----------
-mobile_warnings = check_mobile_issues()
-if mobile_warnings and not st.session_state.mobile_warnings_shown:
-    with st.expander("📱 Mobile Tips & Warnings", expanded=True):
-        for warning in mobile_warnings:
-            st.markdown(warning)
-        st.markdown("---")
-        st.markdown("**For best results:**")
-        st.markdown("1. Use WiFi connection")
-        st.markdown("2. Keep screen active during processing")
-        st.markdown("3. Close other browser tabs")
-        st.markdown("4. Use files under 50MB for faster processing")
-    st.session_state.mobile_warnings_shown = True
+# Main layout with mobile-friendly columns
+st.subheader("📁 Upload Your Media")
 
-# ---------- UPLOAD SECTIONS (MOBILE OPTIMIZED) ----------
-st.subheader("📤 Upload Files")
-
-# Mobile: Use single column layout for small screens
 col1, col2 = st.columns(2)
 
 with col1:
     background_file = st.file_uploader(
         "**Background Audio/Video**",
-        type=["mp3", "mp4", "mov", "m4a", "wav", "avi"],
-        help="Audio will be extracted. Max 200MB recommended for mobile.",
+        type=["mp3", "wav", "m4a", "mp4", "mov", "avi"],
+        help="Audio will be extracted from this file. MP3 recommended for mobile.",
         key="bg_uploader"
     )
     
@@ -265,48 +330,37 @@ with col1:
             st.session_state.bg_clip = None
             st.session_state.prev_bg_file = background_file.name
         
-        # Show file info
-        file_size = len(background_file.getvalue()) / (1024 * 1024)
-        st.caption(f"Size: {file_size:.1f}MB • Type: {background_file.type}")
-        
-        # Save and load with progress
-        with st.spinner("Loading background file..."):
-            bg_path = save_uploaded_file(background_file)
-            if bg_path:
-                st.session_state.bg_path = bg_path
-                bg_ext = os.path.splitext(background_file.name)[1].lower()
-                st.session_state.bg_is_video = bg_ext in ['.mp4', '.mov', '.avi']
-                
-                try:
-                    if st.session_state.bg_is_video:
-                        st.session_state.bg_clip = VideoFileClip(st.session_state.bg_path)
-                        audio = st.session_state.bg_clip.audio
-                        if audio:
-                            st.session_state.bg_duration = audio.duration
-                            st.success(f"✅ Video loaded: {st.session_state.bg_duration:.1f}s")
-                            
-                            # Show quick video info for mobile
-                            with st.expander("Video Info", expanded=False):
-                                st.write(f"Dimensions: {st.session_state.bg_clip.size}")
-                                st.write(f"FPS: {st.session_state.bg_clip.fps}")
-                        else:
-                            st.error("No audio in video file")
-                    else:
-                        audio = AudioFileClip(st.session_state.bg_path)
+        with st.spinner("Loading background..."):
+            st.session_state.bg_path = save_uploaded_file_mobile(background_file)
+            bg_ext = os.path.splitext(background_file.name)[1].lower()
+            st.session_state.bg_is_video = bg_ext in ['.mp4', '.mov', '.avi']
+            
+            try:
+                if st.session_state.bg_is_video:
+                    st.session_state.bg_clip = VideoFileClip(st.session_state.bg_path)
+                    audio = st.session_state.bg_clip.audio
+                    if audio:
                         st.session_state.bg_duration = audio.duration
-                        audio.close()
-                        st.success(f"✅ Audio loaded: {st.session_state.bg_duration:.1f}s")
-                        
-                except Exception as e:
-                    st.error(f"❌ Error loading file: {str(e)}")
-                    if "memory" in str(e).lower():
-                        st.info("Try a smaller file or close other apps")
+                        st.success(f"✅ Video loaded: {background_file.name[:20]}... ({st.session_state.bg_duration:.1f}s)")
+                    else:
+                        st.error("No audio track found in video")
+                        st.stop()
+                else:
+                    audio = AudioFileClip(st.session_state.bg_path)
+                    st.session_state.bg_duration = audio.duration
+                    audio.close()
+                    st.success(f"✅ Audio loaded: {background_file.name[:20]}... ({st.session_state.bg_duration:.1f}s)")
+                
+            except Exception as e:
+                st.error(f"Error loading file: {str(e)}")
+                if is_mobile:
+                    st.info("💡 Tip: Try converting to MP3/MP4 format for better mobile compatibility")
 
 with col2:
     overlay_file = st.file_uploader(
-        "**Overlay Video**",
-        type=["mp4", "mov", "avi", "mkv"],
-        help="Video overlay (no resizing). Max 150MB for mobile.",
+        "**Overlay Video/Image**",
+        type=["mp4", "mov", "avi", "jpg", "jpeg", "png", "gif"],
+        help="Video or image overlay. All formats supported.",
         key="overlay_uploader"
     )
     
@@ -315,446 +369,472 @@ with col2:
             st.session_state.overlay_clip = None
             st.session_state.prev_overlay_file = overlay_file.name
         
-        # Show file info
-        file_size = len(overlay_file.getvalue()) / (1024 * 1024)
-        st.caption(f"Size: {file_size:.1f}MB • Type: {overlay_file.type}")
-        
-        # Save and load
-        with st.spinner("Loading overlay video..."):
-            overlay_path = save_uploaded_file(overlay_file)
-            if overlay_path:
-                st.session_state.overlay_path = overlay_path
-                st.session_state.overlay_is_image = False
-                
-                try:
+        with st.spinner("Loading overlay..."):
+            st.session_state.overlay_path = save_uploaded_file_mobile(overlay_file)
+            overlay_ext = os.path.splitext(overlay_file.name)[1].lower()
+            st.session_state.overlay_is_image = overlay_ext in ['.jpg', '.jpeg', '.png', '.gif']
+            
+            try:
+                if st.session_state.overlay_is_image:
+                    # Handle image as video clip
+                    img = Image.open(st.session_state.overlay_path)
+                    img_array = np.array(img)
+                    st.session_state.overlay_clip = ImageClip(img_array, duration=10)  # Default 10s for images
+                    st.session_state.overlay_duration = 10
+                    st.success(f"✅ Image loaded: {overlay_file.name[:20]}...")
+                    
+                    # Show preview
+                    st.image(img, caption="Image Preview", use_column_width=True)
+                else:
+                    # Handle video
                     st.session_state.overlay_clip = VideoFileClip(st.session_state.overlay_path, audio=False)
                     st.session_state.overlay_duration = st.session_state.overlay_clip.duration
-                    st.success(f"✅ Overlay loaded: {st.session_state.overlay_duration:.1f}s")
+                    st.success(f"✅ Video loaded: {overlay_file.name[:20]}... ({st.session_state.overlay_duration:.1f}s)")
                     
-                    # Mobile-optimized preview
-                    with st.expander("Preview & Info", expanded=False):
-                        preview_img = show_single_frame_preview(st.session_state.overlay_path, mobile_optimized=True)
-                        if preview_img:
-                            st.image(preview_img, caption="Frame preview", use_column_width=True)
+                    # Show mobile-optimized preview
+                    target_res = get_mobile_resolution()
+                    preview_img = show_mobile_preview(st.session_state.overlay_path, target_res)
+                    if preview_img:
+                        st.image(preview_img, caption="Mobile Preview", use_column_width=True)
                         
-                        col_info1, col_info2 = st.columns(2)
-                        with col_info1:
-                            st.metric("Dimensions", f"{st.session_state.overlay_clip.size[0]}×{st.session_state.overlay_clip.size[1]}")
-                        with col_info2:
-                            st.metric("FPS", f"{st.session_state.overlay_clip.fps:.1f}")
-                            
-                except Exception as e:
-                    st.error(f"❌ Error loading overlay: {str(e)}")
+            except Exception as e:
+                st.error(f"Error loading overlay: {str(e)}")
 
-# ---------- MOBILE-FRIENDLY TRIM INTERFACE ----------
-if st.session_state.bg_duration > 0 or st.session_state.overlay_duration > 0:
+# ---------- MOBILE VIDEO SETTINGS ----------
+st.subheader("⚙️ Mobile Video Settings")
+
+settings_col1, settings_col2, settings_col3 = st.columns(3)
+
+with settings_col1:
+    st.session_state.selected_resolution = st.selectbox(
+        "Mobile Resolution",
+        options=list(MOBILE_RESOLUTIONS.keys()),
+        index=0,
+        help="Select standard mobile portrait resolution"
+    )
+    
+    if st.session_state.selected_resolution == "Custom":
+        col_custom1, col_custom2 = st.columns(2)
+        with col_custom1:
+            st.session_state.custom_width = st.number_input("Width", min_value=480, max_value=3840, value=1080, step=10)
+        with col_custom2:
+            st.session_state.custom_height = st.number_input("Height", min_value=480, max_value=3840, value=1920, step=10)
+
+with settings_col2:
+    st.session_state.fit_mode = st.selectbox(
+        "Fit Mode",
+        options=['cover', 'contain', 'stretch'],
+        format_func=lambda x: {
+            'cover': 'Fill Screen (Crop)',
+            'contain': 'Fit to Screen (Letterbox)',
+            'stretch': 'Stretch to Fit'
+        }[x],
+        help="How to handle different aspect ratios"
+    )
+    
+    if st.session_state.fit_mode == 'contain':
+        st.session_state.bg_color = st.color_picker(
+            "Background Color",
+            value="#000000",
+            help="Color for letterbox/pillarbox areas"
+        )
+
+with settings_col3:
+    # Show selected resolution preview
+    target_width, target_height = get_mobile_resolution()
+    st.metric("Target Resolution", f"{target_width} × {target_height}")
+    st.caption(f"Aspect ratio: {target_width/target_height:.2f}:1")
+
+# ---------- TRIM SETTINGS (MOBILE-OPTIMIZED) ----------
+if st.session_state.bg_duration > 0:
     st.subheader("✂️ Trim Settings")
     
-    # Audio trim section
-    if st.session_state.bg_duration > 0:
-        with st.expander("Audio Trim", expanded=True):
-            col_a1, col_a2, col_a3 = st.columns([2, 1, 1])
+    # Mobile-friendly trim interface
+    if is_mobile:
+        # Simplified interface for mobile
+        audio_start = st.slider(
+            "Audio Start (seconds)",
+            0.0,
+            float(st.session_state.bg_duration),
+            0.0,
+            0.5,
+            key="audio_start_mobile"
+        )
+        
+        audio_end = st.slider(
+            "Audio End (seconds)",
+            float(audio_start),
+            float(st.session_state.bg_duration),
+            min(float(st.session_state.bg_duration), float(audio_start) + 30.0),
+            0.5,
+            key="audio_end_mobile"
+        )
+        
+        audio_duration = audio_end - audio_start
+        st.info(f"🎵 Audio: {audio_start:.1f}s to {audio_end:.1f}s ({audio_duration:.1f}s)")
+    else:
+        # Advanced interface for desktop
+        col_trim1, col_trim2 = st.columns(2)
+        
+        with col_trim1:
+            audio_start = st.slider(
+                "Audio Start",
+                0.0,
+                float(st.session_state.bg_duration),
+                0.0,
+                0.1,
+                key="audio_start_desktop"
+            )
+        
+        with col_trim2:
+            max_audio_end = st.session_state.bg_duration
+            audio_duration_val = st.slider(
+                "Audio Duration",
+                1.0,
+                float(max_audio_end - audio_start),
+                min(30.0, float(max_audio_end - audio_start)),
+                0.1,
+                key="audio_duration_desktop"
+            )
             
-            with col_a1:
-                audio_start = st.slider(
-                    "Start (seconds)",
-                    0.0,
-                    float(st.session_state.bg_duration),
-                    0.0,
-                    0.5,
-                    key="audio_start_mobile",
-                    help="Audio start time"
-                )
-            
-            max_audio_duration = st.session_state.bg_duration - audio_start
-            
-            with col_a2:
-                default_duration = min(30.0, float(max_audio_duration))
-                audio_duration = st.number_input(
-                    "Duration (s)",
-                    min_value=1.0,
-                    max_value=float(max_audio_duration),
-                    value=default_duration,
-                    step=0.5,
-                    key="audio_duration_mobile"
-                )
-            
-            with col_a3:
-                audio_end = audio_start + audio_duration
-                st.metric("End", f"{audio_end:.1f}s")
-            
-            # Visual timeline for mobile
-            st.progress(min(1.0, audio_end / st.session_state.bg_duration))
-            st.caption(f"Audio: {audio_start:.1f}s → {audio_end:.1f}s ({audio_duration:.1f}s total)")
+            audio_end = audio_start + audio_duration_val
+            st.info(f"Duration: {audio_duration_val:.1f}s")
 
-    # Video trim section
-    if st.session_state.overlay_duration > 0:
-        with st.expander("Video Trim", expanded=True):
-            col_v1, col_v2, col_v3 = st.columns([2, 1, 1])
-            
-            with col_v1:
-                overlay_start = st.slider(
-                    "Start (seconds)",
-                    0.0,
-                    float(st.session_state.overlay_duration),
-                    0.0,
-                    0.5,
-                    key="overlay_start_mobile",
-                    help="Video start time"
-                )
-            
-            max_overlay_duration = st.session_state.overlay_duration - overlay_start
-            
-            with col_v2:
-                default_duration = min(30.0, float(max_overlay_duration))
-                overlay_duration = st.number_input(
-                    "Duration (s)",
-                    min_value=1.0,
-                    max_value=float(max_overlay_duration),
-                    value=default_duration,
-                    step=0.5,
-                    key="overlay_duration_mobile"
-                )
-            
-            with col_v3:
-                overlay_end = overlay_start + overlay_duration
-                st.metric("End", f"{overlay_end:.1f}s")
-            
-            # Visual timeline for mobile
-            st.progress(min(1.0, overlay_end / st.session_state.overlay_duration))
-            st.caption(f"Video: {overlay_start:.1f}s → {overlay_end:.1f}s ({overlay_duration:.1f}s total)")
+if st.session_state.overlay_duration > 0:
+    # Overlay trim settings
+    overlay_start = st.slider(
+        "Overlay Start (seconds)",
+        0.0,
+        float(st.session_state.overlay_duration),
+        0.0,
+        0.5,
+        key="overlay_start"
+    )
+    
+    max_overlay_duration = st.session_state.overlay_duration - overlay_start
+    overlay_duration_val = st.slider(
+        "Overlay Duration",
+        1.0,
+        float(max_overlay_duration),
+        min(float(st.session_state.bg_duration) if st.session_state.bg_duration > 0 else 30.0, 
+            float(max_overlay_duration)),
+        0.5,
+        key="overlay_duration"
+    )
+    
+    overlay_end = overlay_start + overlay_duration_val
+    st.info(f"🎬 Overlay: {overlay_start:.1f}s to {overlay_end:.1f}s ({overlay_duration_val:.1f}s)")
 
-# ---------- MOBILE-OPTIMIZED PROCESS FUNCTION ----------
-def process_video_mobile():
-    """Combine audio and video optimized for mobile processing"""
+# ---------- PROCESS FUNCTION FOR MOBILE ----------
+def process_mobile_video():
+    """Create mobile-optimized portrait video"""
     try:
-        st.session_state.processing = True
-        
-        # Get trim values from mobile-friendly controls
+        # Get trim values
         audio_start = st.session_state.get('audio_start_mobile', 
-                                         st.session_state.get('audio_start', 0))
-        audio_duration_val = st.session_state.get('audio_duration_mobile',
-                                                st.session_state.get('audio_duration', 30))
-        audio_end = audio_start + audio_duration_val
+                                         st.session_state.get('audio_start_desktop', 0))
+        audio_end = st.session_state.get('audio_end_mobile', 
+                                       st.session_state.get('audio_start_desktop', 0) + 
+                                       st.session_state.get('audio_duration_desktop', 30))
         
-        overlay_start = st.session_state.get('overlay_start_mobile',
-                                           st.session_state.get('overlay_start', 0))
-        overlay_duration_val = st.session_state.get('overlay_duration_mobile',
-                                                  st.session_state.get('overlay_duration', 30))
-        overlay_end = overlay_start + overlay_duration_val
+        overlay_start = st.session_state.get('overlay_start', 0)
+        overlay_end = st.session_state.get('overlay_start', 0) + \
+                     st.session_state.get('overlay_duration', 30)
         
-        # Progress tracking for mobile
-        progress_bar = st.progress(0)
-        status_text = st.empty()
+        # Get mobile settings
+        target_width, target_height = get_mobile_resolution()
+        fit_mode = st.session_state.fit_mode
+        bg_color = st.session_state.bg_color
         
-        # Step 1: Extract audio
-        status_text.text("Step 1/4: Extracting audio...")
-        progress_bar.progress(25)
-        
-        if st.session_state.bg_is_video:
-            audio_clip = st.session_state.bg_clip.audio.subclip(audio_start, audio_end)
-        else:
-            audio_clip = AudioFileClip(st.session_state.bg_path).subclip(audio_start, audio_end)
+        with st.spinner("🎵 Extracting audio..."):
+            if st.session_state.bg_is_video:
+                audio_clip = st.session_state.bg_clip.audio.subclip(audio_start, audio_end)
+            else:
+                audio_clip = AudioFileClip(st.session_state.bg_path).subclip(audio_start, audio_end)
         
         final_audio_duration = audio_clip.duration
         
-        # Step 2: Process overlay video
-        status_text.text("Step 2/4: Processing video...")
-        progress_bar.progress(50)
+        # Progress indicator
+        progress_bar = st.progress(0)
         
-        overlay = st.session_state.overlay_clip.subclip(overlay_start, overlay_end)
-        
-        # Match durations for mobile - efficient looping
-        if overlay.duration < final_audio_duration:
-            loops_needed = int(final_audio_duration / overlay.duration) + 1
-            # Use list comprehension for efficiency
-            overlay_loops = [overlay] * loops_needed
-            overlay = concatenate_videoclips(overlay_loops, method="compose")
-            overlay = overlay.subclip(0, final_audio_duration)
-        elif overlay.duration > final_audio_duration:
-            overlay = overlay.subclip(0, final_audio_duration)
-        
-        # Step 3: Combine with audio
-        status_text.text("Step 3/4: Combining audio and video...")
-        progress_bar.progress(75)
-        
-        final_video = overlay.set_audio(audio_clip)
-        final_video = final_video.set_duration(final_audio_duration)
-        
-        # Step 4: Save video (mobile-optimized settings)
-        status_text.text("Step 4/4: Saving video...")
-        
-        output_path = tempfile.NamedTemporaryFile(delete=False, suffix="_mobile.mp4").name
-        
-        # Get original dimensions
-        width, height = overlay.size
-        
-        # Mobile-optimized encoding settings
-        final_video.write_videofile(
-            output_path,
-            fps=min(30, overlay.fps) if hasattr(overlay, 'fps') else 30,  # Lower FPS for mobile
-            codec="libx264",
-            audio_codec="aac",
-            bitrate="4M",  # Lower bitrate for mobile
-            verbose=False,
-            logger=None,
-            preset='fast',  # Faster encoding for mobile
-            threads=2,  # Fewer threads for mobile
-            ffmpeg_params=[
-                '-movflags', '+faststart',  # Quick start for mobile
-                '-profile:v', 'baseline',  # Better mobile compatibility
-                '-level', '3.0'
-            ]
-        )
-        
-        progress_bar.progress(100)
-        status_text.text("Processing complete!")
-        time.sleep(0.5)
+        with st.spinner("📱 Processing video for mobile..."):
+            # Trim overlay
+            overlay = st.session_state.overlay_clip.subclip(overlay_start, overlay_end)
+            progress_bar.progress(25)
+            
+            # Loop overlay if shorter than audio
+            if overlay.duration < final_audio_duration:
+                loops_needed = int(final_audio_duration / overlay.duration) + 1
+                overlay_loops = [overlay] * loops_needed
+                overlay = concatenate_videoclips(overlay_loops)
+                overlay = overlay.subclip(0, final_audio_duration)
+            elif overlay.duration > final_audio_duration:
+                overlay = overlay.subclip(0, final_audio_duration)
+            
+            progress_bar.progress(50)
+            
+            # Resize for mobile
+            mobile_clip = create_mobile_compatible_video(
+                overlay, 
+                target_width, 
+                target_height, 
+                fit_mode, 
+                bg_color
+            )
+            progress_bar.progress(75)
+            
+            # Optimize for mobile
+            mobile_clip = optimize_for_mobile_export(mobile_clip, (target_width, target_height))
+            
+            # Add audio
+            final_video = mobile_clip.set_audio(audio_clip)
+            final_video = final_video.set_duration(final_audio_duration)
+            
+            progress_bar.progress(90)
+            
+        with st.spinner("💾 Saving mobile video..."):
+            output_path = tempfile.NamedTemporaryFile(delete=False, suffix="_mobile.mp4").name
+            
+            # Mobile-optimized encoding settings
+            bitrate = "5M" if target_height <= 1080 else "8M"
+            
+            final_video.write_videofile(
+                output_path,
+                fps=min(final_video.fps, 30),  # Lower fps for mobile
+                codec="libx264",
+                audio_codec="aac",
+                bitrate=bitrate,
+                audio_bitrate="192k",
+                threads=2,  # Reduce threads for mobile compatibility
+                preset='fast',  # Faster encoding
+                ffmpeg_params=[
+                    '-movflags', '+faststart',
+                    '-profile:v', 'baseline',  # Better mobile compatibility
+                    '-level', '3.0',
+                    '-pix_fmt', 'yuv420p'  # Ensure compatibility
+                ],
+                verbose=False,
+                logger=None
+            )
+            
+            progress_bar.progress(100)
         
         # Cleanup
         audio_clip.close()
         overlay.close()
+        mobile_clip.close()
         final_video.close()
         
-        return output_path, final_audio_duration, width, height
+        return output_path, final_audio_duration, target_width, target_height
         
     except Exception as e:
-        st.error(f"Processing error: {str(e)}")
-        
-        # Mobile-specific error guidance
-        if "memory" in str(e).lower():
-            st.info("💡 **Mobile Tip:** Try smaller files or restart the app")
-        elif "codec" in str(e).lower():
-            st.info("💡 **Mobile Tip:** Try converting your video to MP4 format first")
-        
-        import traceback
-        with st.expander("Technical Details"):
+        st.error(f"❌ Processing error: {str(e)}")
+        with st.expander("Error details for debugging"):
             st.code(traceback.format_exc())
         return None, 0, 0, 0
-    finally:
-        st.session_state.processing = False
-        if 'progress_bar' in locals():
-            progress_bar.empty()
-        if 'status_text' in locals():
-            status_text.empty()
 
 # ---------- CREATE BUTTON (MOBILE OPTIMIZED) ----------
 st.divider()
 
-# Check if ready to process
 files_ready = st.session_state.bg_path and st.session_state.overlay_path
-processing_disabled = not files_ready or st.session_state.processing
 
-create_col1, create_col2 = st.columns([3, 1])
+# Create two columns for buttons
+if is_mobile:
+    create_col, _ = st.columns([3, 1])
+else:
+    create_col = st
 
-with create_col1:
-    if st.button("🎬 **CREATE VIDEO**", 
+with create_col:
+    if st.button("🚀 CREATE MOBILE VIDEO", 
                  type="primary", 
-                 disabled=processing_disabled,
-                 use_container_width=True):
+                 disabled=not files_ready,
+                 use_container_width=True,
+                 help="Generate portrait video optimized for mobile devices"):
         
         if not files_ready:
-            st.warning("Please upload both files first")
+            st.warning("Please upload both background and overlay files first")
             st.stop()
         
-        # Show processing area
-        processing_container = st.container()
-        
-        with processing_container:
-            # Process video
-            output_path, duration, width, height = process_video_mobile()
+        # Check if we're on mobile browser with large files
+        if is_mobile:
+            bg_size = os.path.getsize(st.session_state.bg_path) / (1024 * 1024)
+            overlay_size = os.path.getsize(st.session_state.overlay_path) / (1024 * 1024)
             
-            if output_path and os.path.exists(output_path):
-                st.session_state.last_output_path = output_path
-                
-                # Success message
-                st.success("✅ Video created successfully!")
-                
-                # Display video with mobile-optimized player
-                st.subheader("📺 Your Video")
-                
-                try:
-                    # Read video for display
-                    with open(output_path, "rb") as video_file:
-                        video_bytes = video_file.read()
-                    
-                    # Display with mobile-friendly controls
-                    st.video(video_bytes, format="video/mp4", start_time=0)
-                    
-                except Exception as e:
-                    st.info("Video preview available for download")
-                
-                # Video info cards for mobile
-                file_size = os.path.getsize(output_path) / (1024 * 1024)
-                
-                st.subheader("📊 Video Details")
-                info_cols = st.columns(3)
-                with info_cols[0]:
-                    st.metric("Duration", f"{duration:.1f}s")
-                with info_cols[1]:
-                    st.metric("Resolution", f"{width}×{height}")
-                with info_cols[2]:
-                    st.metric("Size", f"{file_size:.1f}MB")
-                
-                # Mobile-friendly download button
-                st.subheader("📥 Download")
+            if bg_size > 100 or overlay_size > 100:
+                st.warning("⚠️ Large files detected on mobile. Processing may take longer.")
+        
+        # Process video
+        with st.spinner("Creating your mobile video..."):
+            output_path, duration, width, height = process_mobile_video()
+        
+        if output_path and os.path.exists(output_path):
+            st.session_state.output_path = output_path
+            
+            st.success("✅ Mobile video created successfully!")
+            st.balloons()
+            
+            # Show video preview
+            st.subheader("📱 Your Mobile Video")
+            
+            try:
+                # Encode video for display
                 with open(output_path, "rb") as f:
-                    video_data = f.read()
+                    video_bytes = f.read()
                 
-                # Generate filename
-                timestamp = time.strftime("%Y%m%d_%H%M%S")
-                filename = f"mobile_video_{width}x{height}_{timestamp}.mp4"
+                # Display video with mobile aspect ratio
+                st.video(video_bytes)
                 
-                st.download_button(
-                    label="⬇️ **DOWNLOAD VIDEO**",
-                    data=video_data,
-                    file_name=filename,
-                    mime="video/mp4",
-                    type="primary",
-                    use_container_width=True,
-                    help="Tap to download to your device"
-                )
-                
-                # Cleanup option for mobile
-                with st.expander("🔄 Create Another", expanded=False):
-                    if st.button("Clear & Start New", use_container_width=True):
-                        cleanup_temp_files()
-                        for key in ['bg_path', 'overlay_path', 'bg_clip', 'overlay_clip']:
-                            st.session_state[key] = None
-                        st.rerun()
+            except Exception as e:
+                st.info("Video preview loaded. Download to view on your device.")
+            
+            # Video info
+            file_size = os.path.getsize(output_path) / (1024 * 1024)
+            
+            col_info1, col_info2, col_info3 = st.columns(3)
+            with col_info1:
+                st.metric("Duration", f"{duration:.1f}s")
+            with col_info2:
+                st.metric("Resolution", f"{width}×{height}")
+            with col_info3:
+                st.metric("File Size", f"{file_size:.1f}MB")
+            
+            # Download button
+            st.subheader("📥 Download")
+            
+            with open(output_path, "rb") as f:
+                video_data = f.read()
+            
+            # Generate descriptive filename
+            from datetime import datetime
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"mobile_video_{width}x{height}_{timestamp}.mp4"
+            
+            st.download_button(
+                label="DOWNLOAD MOBILE VIDEO",
+                data=video_data,
+                file_name=filename,
+                mime="video/mp4",
+                type="secondary",
+                use_container_width=True,
+                help="Download portrait video optimized for mobile devices"
+            )
+            
+            # Cleanup instructions
+            with st.expander("🗑️ Cleanup Options"):
+                st.info("Temporary files will be automatically cleaned up. For large files, consider:")
+                st.markdown("""
+                1. **Close the browser tab** when done
+                2. **Clear browser cache** if storage is full
+                3. **Download promptly** - files are temporary
+                """)
+            
+            # Force cleanup
+            gc.collect()
 
-with create_col2:
-    # Quick status indicator
-    if files_ready:
-        st.success("Ready")
-    elif st.session_state.bg_path or st.session_state.overlay_path:
-        st.warning("Need both files")
-    else:
-        st.info("Upload files")
-
-# ---------- MOBILE-SPECIFIC INSTRUCTIONS ----------
-with st.expander("📱 **Mobile Guide**", expanded=False):
+# ---------- MOBILE TROUBLESHOOTING GUIDE ----------
+with st.expander("🔧 Mobile Troubleshooting Guide", expanded=is_mobile):
     st.markdown("""
-    ### 📖 Mobile-Optimized Video Maker
+    ### Common Mobile Issues & Solutions:
     
-    **Perfect for:**
-    - Smartphones & Tablets
-    - Social media videos
-    - Quick edits on the go
+    **📱 Browser Issues:**
+    - **Chrome Mobile**: Works best - enable desktop site for larger files
+    - **Safari iOS**: May have 50MB limit - use smaller files
+    - **Firefox Mobile**: Good for large files
     
-    **📤 Upload Tips:**
-    1. **Background File**: MP3 (audio) or MP4 (video with audio)
-    2. **Overlay Video**: MP4 format works best
-    3. **File Sizes**: Under 50MB for faster mobile processing
-    4. **Internet**: Use WiFi for large files
+    **⚠️ Processing Failures:**
+    - **Large Files**: Compress videos to <100MB before uploading
+    - **Unsupported Codecs**: Convert to MP4 (H.264/AAC) first
+    - **Slow Processing**: Use lower resolutions (720p instead of 1080p)
     
-    **✂️ Trimming Guide:**
-    - **Audio Trim**: Set start time and duration
-    - **Video Trim**: Set start time and duration
-    - **Auto-loop**: Video repeats if shorter than audio
+    **🎯 Mobile-Specific Tips:**
+    1. **Portrait First**: Upload portrait videos for best results
+    2. **Wi-Fi Recommended**: Use Wi-Fi for files >20MB
+    3. **Close Apps**: Close other apps for better performance
+    4. **Update Browser**: Use latest browser version
     
-    **🎬 Processing:**
-    - Keep screen ON during processing
-    - Don't switch browser tabs
-    - Wait for completion message
-    
-    **📥 Download:**
-    - Tap download button
-    - Save to Photos/Gallery
-    - Share directly to apps
-    
-    **⚠️ Mobile Limitations:**
-    - Large files (>100MB) may fail
-    - Processing time varies by device
-    - Browser may timeout after 5 minutes
-    - iOS Safari has 50MB download limit
-    
-    **💡 Pro Tips:**
-    1. Use landscape videos for better preview
-    2. Close other apps before processing
-    3. Convert videos to MP4 first
-    4. Keep videos under 60 seconds for quick processing
+    **💡 Recommended Settings for Mobile:**
+    - Resolution: 1080x1920 (Standard Portrait)
+    - Fit Mode: "Fill Screen" for social media
+    - File Format: MP4 with H.264 codec
+    - Max File Size: 50MB for best performance
     """)
+    
+    if is_mobile:
+        st.warning("**You're on mobile!** For best results, use Wi-Fi and keep the screen active during processing.")
 
-# ---------- MOBILE TROUBLESHOOTING ----------
-with st.expander("🔧 Troubleshooting", expanded=False):
-    tab1, tab2, tab3 = st.tabs(["Common Issues", "Browser Tips", "File Help"])
+# ---------- INSTRUCTIONS FOR MOBILE ----------
+with st.expander("📖 How to Create Perfect Mobile Videos", expanded=not is_mobile):
+    st.markdown("""
+    ## 📱 Mobile Video Creation Guide
     
-    with tab1:
-        st.markdown("""
-        **❌ Upload fails:**
-        - Check file format (MP3/MP4 recommended)
-        - Reduce file size (<50MB)
-        - Check internet connection
-        
-        **❌ Processing fails:**
-        - Wait 30 seconds, try again
-        - Refresh the page
-        - Use smaller files
-        
-        **❌ No audio in result:**
-        - Ensure background file has audio
-        - Check volume isn't muted
-        - Try different audio file
-        
-        **❌ Can't download:**
-        - iOS: Use "Save to Files" option
-        - Android: Check Downloads folder
-        - Allow downloads in browser settings
-        """)
+    ### **Step-by-Step Process:**
     
-    with tab2:
-        st.markdown("""
-        **📱 Browser Compatibility:**
-        - **Chrome Mobile**: Best experience
-        - **Safari iOS**: Enable all permissions
-        - **Firefox Mobile**: Allow autoplay
-        
-        **🔧 Browser Settings:**
-        1. Enable JavaScript
-        2. Allow camera/microphone access
-        3. Disable popup blocker
-        4. Enable auto-play videos
-        
-        **🌐 Connection Issues:**
-        - Use WiFi for large files
-        - Disable VPN if slow
-        - Clear browser cache if stuck
-        """)
+    1. **Upload Media**
+       - **Background**: Audio file (MP3) or Video with audio
+       - **Overlay**: Video or Image to display
     
-    with tab3:
-        st.markdown("""
-        **📁 Supported Formats:**
-        - **Audio**: MP3, M4A, WAV (from video)
-        - **Video**: MP4, MOV, AVI
-        
-        **🔄 Conversion Tools:**
-        - Online: CloudConvert, Zamzar
-        - Mobile: Video Converter apps
-        - Desktop: HandBrake, VLC
-        
-        **📊 File Size Guide:**
-        - 1 min video ≈ 10-20MB
-        - HD video ≈ 5MB per 10 seconds
-        - Recommended max: 50MB for mobile
-        
-        **🎞️ Resolution Tips:**
-        - 1080p (1920×1080) - Best quality
-        - 720p (1280×720) - Good for mobile
-        - 480p (854×480) - Fastest processing
-        """)
+    2. **Select Mobile Settings**
+       - Choose **portrait resolution** (9:16 recommended)
+       - Select **fit mode**:
+         - *Fill Screen*: Crops to fill (best for Stories/Reels)
+         - *Fit to Screen*: Shows entire video with borders
+         - *Stretch*: Distorts to fit (use cautiously)
+    
+    3. **Trim Content**
+       - Set exact start/end points for both audio and video
+       - Match durations for perfect sync
+    
+    4. **Generate & Download**
+       - Creates portrait video optimized for mobile
+       - Automatic format conversion for compatibility
+       - One-click download to your device
+    
+    ### **Best Practices:**
+    - **For Instagram/Stories**: Use 1080x1920 with "Fill Screen"
+    - **For TikTok/Reels**: Use 1080x1920, keep under 60 seconds
+    - **For WhatsApp/Status**: Use 720x1280 for faster sharing
+    - **For YouTube Shorts**: Use 1080x1920, vertical video
+    
+    ### **Mobile-Optimized Features:**
+    ✅ **Portrait-first design**  
+    ✅ **Touch-friendly controls**  
+    ✅ **Mobile browser support**  
+    ✅ **Automatic rotation handling**  
+    ✅ **Efficient encoding for mobile**  
+    ✅ **Small file sizes for sharing**  
+    """)
 
 # ---------- FOOTER WITH MOBILE INFO ----------
 st.divider()
-
 footer_col1, footer_col2, footer_col3 = st.columns(3)
+
 with footer_col1:
     st.caption(f"Version {APP_VERSION}")
-with footer_col2:
-    st.caption("Mobile Optimized")
-with footer_col3:
-    st.caption("No Resizing • Original Quality")
 
-# Auto-cleanup on session end
-if not files_ready and st.session_state.last_output_path:
-    cleanup_temp_files()
+with footer_col2:
+    if is_mobile:
+        st.caption("📱 Mobile Mode Active")
+    else:
+        st.caption("💻 Desktop Mode")
+
+with footer_col3:
+    st.caption("Optimized for portrait mobile video")
+
+# ---------- AUTO-CLEANUP ON EXIT ----------
+def cleanup_temp_files():
+    """Clean up temporary files"""
+    temp_files = [
+        st.session_state.get('bg_path'),
+        st.session_state.get('overlay_path'),
+        st.session_state.get('output_path')
+    ]
+    
+    for file_path in temp_files:
+        if file_path and os.path.exists(file_path):
+            try:
+                os.unlink(file_path)
+            except:
+                pass
+
+# Register cleanup
+import atexit
+atexit.register(cleanup_temp_files)
