@@ -26,7 +26,7 @@ PRESETS = {
 }
 
 # Initialize session state
-for k, v in {'bg_dur': 0.0, 'ov_dur': 0.0, 'a_trim': [0.0, 30.0], 'v_trim': [0.0, 30.0], 'img_dur': 5.0, 'rotation': 0, 'output_path': None}.items():
+for k, v in {'bg_dur': 0.0, 'ov_dur': 0.0, 'a_trim': [0.0, 30.0], 'v_trim': [0.0, 30.0], 'img_dur': 5.0, 'rotation': 0}.items():
     st.session_state.setdefault(k, v)
 
 def save_file(f):
@@ -48,30 +48,39 @@ def get_video_rotation(video_path):
     except:
         return 0
 
-def resize_video_to_fit(clip, target_size):
-    """Resize video to fit target dimensions while maintaining aspect ratio with black bars"""
+def resize_with_ffmpeg(input_path, output_path, target_size, audio_path, rotation=0):
+    """Use ffmpeg to resize video with black bars and add audio"""
     target_w, target_h = target_size
-    clip_w, clip_h = clip.size
     
-    # Calculate scaling
-    scale = min(target_w / clip_w, target_h / clip_h)
-    new_w, new_h = int(clip_w * scale), int(clip_h * scale)
+    # Build ffmpeg filter
+    # scale video to fit inside target size, add black bars
+    vf = f"scale={target_w}:{target_h}:force_original_aspect_ratio=decrease,pad={target_w}:{target_h}:(ow-iw)/2:(oh-ih)/2"
     
-    # Make dimensions even (required for video encoding)
-    new_w = new_w if new_w % 2 == 0 else new_w - 1
-    new_h = new_h if new_h % 2 == 0 else new_h - 1
+    # Add rotation if needed
+    if rotation == 90:
+        vf = f"transpose=2,{vf}"
+    elif rotation == 270:
+        vf = f"transpose=1,{vf}"
+    elif rotation == 180:
+        vf = f"transpose=2,transpose=2,{vf}"
     
-    # Resize clip using newsize parameter
-    resized = clip.resize(newsize=(new_w, new_h))
+    cmd = [
+        'ffmpeg', '-y',
+        '-i', input_path,
+        '-i', audio_path,
+        '-map', '0:v:0',
+        '-map', '1:a:0',
+        '-vf', vf,
+        '-c:v', 'libx264',
+        '-preset', 'medium',
+        '-crf', '23',
+        '-c:a', 'aac',
+        '-b:a', '192k',
+        '-shortest',
+        output_path
+    ]
     
-    # Create black background
-    bg = ColorClip(size=target_size, color=(0, 0, 0), duration=clip.duration)
-    
-    # Center the resized clip
-    x_pos = (target_w - new_w) // 2
-    y_pos = (target_h - new_h) // 2
-    
-    return CompositeVideoClip([bg, resized.set_position((x_pos, y_pos))], size=target_size)
+    subprocess.run(cmd, check=True, capture_output=True)
 
 # Upload section
 c1, c2 = st.columns(2)
@@ -156,126 +165,77 @@ st.divider()
 if st.button("🎬 Create Video", type="primary", disabled=not (bg and ov), use_container_width=True):
     try:
         with st.spinner("Processing video..."):
-            st.write("🔄 Step 1: Extracting audio...")
-            # Extract audio
+            # Extract and trim audio
             audio_src = clip if is_vid else AudioFileClip(bg_path)
             audio = audio_src.audio.subclip(*st.session_state.a_trim) if is_vid else audio_src.subclip(*st.session_state.a_trim)
             dur = audio.duration
-            st.write(f"✅ Audio extracted: {dur:.1f}s")
+            
+            # Save trimmed audio
+            audio_temp = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3").name
+            audio.write_audiofile(audio_temp, verbose=False, logger=None)
             
             # Process overlay
-            st.write("🔄 Step 2: Processing overlay...")
             if is_img:
+                # For images, use MoviePy as before
                 img_arr = np.array(img)
                 img_dur = min(st.session_state.img_dur, dur)
                 ov_final = ImageClip(img_arr, duration=img_dur)
                 if img_dur < dur:
                     bg_clip = ColorClip(size=ov_final.size, color=(0,0,0), duration=dur)
                     ov_final = CompositeVideoClip([bg_clip, ov_final.set_position('center')], duration=dur)
-                st.write(f"✅ Image overlay ready: {ov_final.size}")
+                
+                final = ov_final.set_audio(audio).set_duration(dur)
+                out = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4").name
+                
+                final.write_videofile(out, fps=30, codec="libx264", audio_codec="aac", bitrate="8M", verbose=False, logger=None)
+                
             else:
-                ov_final = ov_clip.subclip(*st.session_state.v_trim)
-                st.write(f"✅ Video trimmed: {ov_final.size}")
+                # For videos with resizing, use ffmpeg directly
+                video_temp = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4").name
                 
-                # Apply rotation if needed
-                rotation = st.session_state.rotation
-                if rotation != 0:
-                    st.write(f"🔄 Applying rotation: {rotation}°...")
-                    if rotation == 90:
-                        ov_final = ov_final.rotate(-90)
-                    elif rotation == 270:
-                        ov_final = ov_final.rotate(90)
-                    elif rotation == 180:
-                        ov_final = ov_final.rotate(180)
-                    st.write(f"✅ Rotation applied: {ov_final.size}")
+                # Trim video
+                ov_trimmed = ov_clip.subclip(*st.session_state.v_trim)
                 
-                if ov_final.duration < dur:
-                    st.write("🔄 Looping video to match audio...")
-                    loops = int(dur / ov_final.duration) + 1
-                    ov_final = concatenate_videoclips([ov_final] * loops).subclip(0, dur)
-                elif ov_final.duration > dur:
-                    ov_final = ov_final.subclip(0, dur)
-                st.write(f"✅ Duration matched: {ov_final.duration:.1f}s")
-            
-            # Apply target dimensions if selected
-            if target_dims:
-                st.write(f"🔄 Step 3: Resizing to {target_dims[0]}×{target_dims[1]}...")
-                st.write(f"Original size: {ov_final.size}")
+                # Loop if needed
+                if ov_trimmed.duration < dur:
+                    loops = int(dur / ov_trimmed.duration) + 1
+                    ov_trimmed = concatenate_videoclips([ov_trimmed] * loops).subclip(0, dur)
+                elif ov_trimmed.duration > dur:
+                    ov_trimmed = ov_trimmed.subclip(0, dur)
                 
-                target_w, target_h = target_dims
-                clip_w, clip_h = ov_final.size
+                # Save trimmed video
+                ov_trimmed.write_videofile(video_temp, codec="libx264", audio=False, verbose=False, logger=None)
                 
-                # Calculate scaling
-                scale = min(target_w / clip_w, target_h / clip_h)
-                new_w, new_h = int(clip_w * scale), int(clip_h * scale)
+                out = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4").name
                 
-                # Make dimensions even
-                new_w = new_w if new_w % 2 == 0 else new_w - 1
-                new_h = new_h if new_h % 2 == 0 else new_h - 1
+                # Use ffmpeg for resizing if target dims specified
+                if target_dims:
+                    resize_with_ffmpeg(video_temp, out, target_dims, audio_temp, st.session_state.rotation)
+                else:
+                    # No resize - just combine with audio
+                    final = ov_trimmed.set_audio(audio).set_duration(dur)
+                    final.write_videofile(out, fps=30, codec="libx264", audio_codec="aac", verbose=False, logger=None)
                 
-                st.write(f"Calculated new size: {new_w}×{new_h}")
-                st.write(f"Resizing clip...")
-                
-                try:
-                    # Try method 1: using newsize
-                    resized = ov_final.resize(newsize=(new_w, new_h))
-                    st.write("✅ Resize successful (method 1)")
-                except Exception as e1:
-                    st.write(f"⚠️ Method 1 failed: {e1}")
-                    try:
-                        # Try method 2: using width/height
-                        resized = ov_final.resize(width=new_w, height=new_h)
-                        st.write("✅ Resize successful (method 2)")
-                    except Exception as e2:
-                        st.write(f"⚠️ Method 2 failed: {e2}")
-                        # Try method 3: using fx
-                        from moviepy.video.fx.resize import resize as fx_resize
-                        resized = fx_resize(ov_final, newsize=(new_w, new_h))
-                        st.write("✅ Resize successful (method 3)")
-                
-                st.write("🔄 Creating black background...")
-                bg_clip = ColorClip(size=target_dims, color=(0, 0, 0), duration=ov_final.duration)
-                
-                st.write("🔄 Compositing video...")
-                x_pos = (target_w - new_w) // 2
-                y_pos = (target_h - new_h) // 2
-                ov_final = CompositeVideoClip([bg_clip, resized.set_position((x_pos, y_pos))], size=target_dims)
-                st.write(f"✅ Resize complete: {ov_final.size}")
-            
-            st.write("🔄 Step 4: Adding audio...")
-            final = ov_final.set_audio(audio).set_duration(dur)
-            
-            st.write("🔄 Step 5: Rendering video...")
-            out = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4").name
-            
-            ffmpeg_params = ['-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2']
-            if not is_img and st.session_state.rotation != 0:
-                ffmpeg_params.extend(['-metadata:s:v:0', 'rotate=0'])
-            
-            final.write_videofile(
-                out, 
-                fps=30,
-                codec="libx264", 
-                audio_codec="aac", 
-                bitrate="8M", 
-                verbose=False, 
-                logger=None,
-                preset='medium',
-                ffmpeg_params=ffmpeg_params
-            )
-            
-            st.session_state.output_path = out
+                # Cleanup temp files
+                ov_trimmed.close()
+                os.unlink(video_temp)
         
         st.success("✅ Video created successfully!")
         st.video(out)
         
-        w, h = final.size
+        # Get final dimensions
+        probe_cmd = ['ffprobe', '-v', 'error', '-select_streams', 'v:0', 
+                     '-show_entries', 'stream=width,height', '-of', 'json', out]
+        probe_result = subprocess.run(probe_cmd, capture_output=True, text=True)
+        probe_data = json.loads(probe_result.stdout)
+        w = probe_data['streams'][0]['width']
+        h = probe_data['streams'][0]['height']
+        
         c1, c2, c3 = st.columns(3)
         c1.metric("Duration", f"{dur:.1f}s")
         c2.metric("Resolution", f"{w}×{h}")
         c3.metric("Size", f"{os.path.getsize(out)/(1024*1024):.1f}MB")
         
-        # Format name for download
         format_name = selected_preset.split(" - ")[0].replace("📱 ", "").replace("📺 ", "").replace("⬜ ", "").replace(" ", "_")
         
         with open(out, "rb") as f:
@@ -289,8 +249,8 @@ if st.button("🎬 Create Video", type="primary", disabled=not (bg and ov), use_
             clip.close()
         else:
             audio_src.close()
-        ov_final.close()
-        final.close()
+        
+        os.unlink(audio_temp)
         
         import time
         time.sleep(0.5)
