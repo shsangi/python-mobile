@@ -20,7 +20,7 @@ from moviepy.editor import (
 )
 
 # Add version tracking
-VERSION = "2.3.1"
+VERSION = "2.3.2"
 
 # ---------- PAGE ----------
 st.set_page_config(page_title="Fullscreen Video Maker", layout="centered")
