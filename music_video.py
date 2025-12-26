@@ -14,7 +14,7 @@ from moviepy.editor import (
     concatenate_videoclips,
     CompositeVideoClip
 )
-my_title = "🎬 Mobile Video Maker V 23" #update version with any change by adding 1
+my_title = "🎬 Mobile Video Maker V 27" #update version with any change by adding 1
 # ---------- PAGE CONFIG ----------
 st.set_page_config(
     page_title= my_title,
