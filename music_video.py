@@ -15,7 +15,7 @@ from moviepy.editor import (
 
 # ---------- PAGE CONFIG ----------
 st.set_page_config(
-    page_title="Video Trimmer",
+    page_title="Video Maker V 2:1",
     layout="centered",
     initial_sidebar_state="collapsed"
 )
