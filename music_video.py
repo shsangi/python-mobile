@@ -6,10 +6,10 @@ import numpy as np
 from moviepy.editor import VideoFileClip, AudioFileClip, ImageClip, concatenate_videoclips, CompositeVideoClip
 from moviepy.video.VideoClip import ColorClip
 
-st.set_page_config(page_title="🎬 Mobile Video Maker v1", layout="centered")
+st.set_page_config(page_title="🎬 Mobile Video Maker", layout="centered")
 st.markdown('<style>[data-testid="stSidebar"]{display:none}.stButton>button{width:100%}</style>', unsafe_allow_html=True)
 st.title("🎬 Mobile Video Maker")
-st.caption("Combine audio with video or image overlays")
+st.caption("Combine audio with video or image overlays - Preserves mobile video orientation")
 
 # Initialize session state
 for k, v in {'bg_dur': 0.0, 'ov_dur': 0.0, 'a_trim': [0.0, 30.0], 'v_trim': [0.0, 30.0], 'img_dur': 5.0}.items():
@@ -26,12 +26,13 @@ def fmt_time(s):
 
 # Upload section
 c1, c2 = st.columns(2)
+
 with c1:
     bg = st.file_uploader("Background Audio/Video", type=["mp3", "mp4", "mov", "m4a"])
     if bg:
         bg_path = save_file(bg)
         is_vid = bg.name.endswith(('.mp4', '.mov'))
-        clip = VideoFileClip(bg_path) if is_vid else None
+        clip = VideoFileClip(bg_path, target_resolution=(None, None)) if is_vid else None
         audio = clip.audio if is_vid else AudioFileClip(bg_path)
         st.session_state.bg_dur = float(audio.duration)
         st.session_state.a_trim = [0.0, min(30.0, float(audio.duration))]
@@ -47,10 +48,14 @@ with c2:
             st.image(img, width=300)
             st.success(f"✅ Image: {ov.name}")
         else:
-            ov_clip = VideoFileClip(ov_path, audio=False)
+            # Load video with target_resolution to preserve orientation
+            ov_clip = VideoFileClip(ov_path, audio=False, target_resolution=(None, None))
             st.session_state.ov_dur = float(ov_clip.duration)
             st.session_state.v_trim = [0.0, min(30.0, float(ov_clip.duration))]
+            w, h = ov_clip.size
+            orientation = "Portrait" if h > w else "Landscape" if w > h else "Square"
             st.success(f"✅ Video: {ov.name} ({ov_clip.duration:.1f}s)")
+            st.info(f"📐 Resolution: {w}×{h} ({orientation})")
 
 # Audio trim
 if st.session_state.bg_dur > 0:
@@ -103,7 +108,19 @@ if st.button("🎬 Create Video", type="primary", disabled=not (bg and ov), use_
         
         final = ov_final.set_audio(audio).set_duration(dur)
         out = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4").name
-        final.write_videofile(out, fps=30, codec="libx264", audio_codec="aac", bitrate="8M", verbose=False, logger=None)
+        
+        # Write with proper settings to preserve orientation
+        final.write_videofile(
+            out, 
+            fps=ov_final.fps if hasattr(ov_final, 'fps') else 30,
+            codec="libx264", 
+            audio_codec="aac", 
+            bitrate="8M", 
+            verbose=False, 
+            logger=None,
+            preset='medium',
+            ffmpeg_params=['-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2']  # Ensure even dimensions
+        )
         
         st.success("✅ Video created!")
         st.video(out)
@@ -141,3 +158,5 @@ if st.button("🎬 Create Video", type="primary", disabled=not (bg and ov), use_
         
     except Exception as e:
         st.error(f"Error: {e}")
+        import traceback
+        st.code(traceback.format_exc())
