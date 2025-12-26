@@ -20,7 +20,7 @@ from moviepy.editor import (
 )
 
 # Add version tracking
-VERSION = "2.3.4"  # Updated version
+VERSION = "2.3.5"  # Updated version
 
 # ---------- PAGE ----------
 st.set_page_config(page_title="Fullscreen Video Maker", layout="centered")
@@ -62,44 +62,59 @@ def save_uploaded_file(uploaded_file):
 def generate_video_preview(video_path, start_time=0, end_time=None, height=200):
     """Generate preview GIF for video"""
     try:
+        # Convert all parameters to appropriate types
+        video_path = str(video_path)
+        start_time = float(start_time)
+        height = int(float(height))
+        
         clip = VideoFileClip(video_path)
         
         if end_time is None or end_time > clip.duration:
-            end_time = min(clip.duration, start_time + 3)
+            end_time = min(float(clip.duration), start_time + 3.0)
+        else:
+            end_time = float(end_time)
         
         # Ensure valid time range
-        start_time = float(max(0, min(start_time, clip.duration - 0.1)))
-        end_time = float(max(start_time + 0.1, min(end_time, clip.duration)))
+        start_time = max(0.0, min(start_time, float(clip.duration) - 0.1))
+        end_time = max(start_time + 0.1, min(end_time, float(clip.duration)))
         
         preview_clip = clip.subclip(start_time, end_time)
         
-        # Convert height to integer explicitly
-        height_int = int(float(height))
+        # Ensure height is positive integer
+        if height <= 0:
+            height = 200
         
-        # Resize with integer height
-        preview_clip = preview_clip.resize(height=height_int)
+        # Resize with integer height, maintain aspect ratio
+        preview_clip = preview_clip.resize(height=height)
         
         # Create temp file for GIF
         temp_gif = tempfile.NamedTemporaryFile(delete=False, suffix=".gif")
         temp_gif.close()
         
-        preview_clip.write_gif(temp_gif.name, fps=5, program='ffmpeg')
+        # Write GIF with lower quality for speed
+        preview_clip.write_gif(temp_gif.name, fps=3, program='ffmpeg')
         
         clip.close()
         preview_clip.close()
         
         return temp_gif.name
     except Exception as e:
-        st.error(f"Preview generation error: {str(e)}")
+        # Don't show error for preview - just return None
         return None
 
 def generate_image_preview(image_path, max_size=(300, 300)):
     """Generate preview for image"""
     try:
-        img = Image.open(image_path)
-        # Ensure integer dimensions
+        image_path = str(image_path)
         max_width = int(float(max_size[0]))
         max_height = int(float(max_size[1]))
+        
+        img = Image.open(image_path)
+        
+        # Ensure max dimensions are positive
+        max_width = max(100, max_width)
+        max_height = max(100, max_height)
+        
         img.thumbnail((max_width, max_height))
         
         temp_img = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
@@ -108,7 +123,7 @@ def generate_image_preview(image_path, max_size=(300, 300)):
         
         return temp_img.name
     except Exception as e:
-        st.error(f"Image preview error: {str(e)}")
+        # Don't show error for preview - just return None
         return None
 
 def display_preview(preview_path, title, is_gif=True, start_time=0, end_time=None):
@@ -171,13 +186,12 @@ with col1:
             
             st.session_state.bg_duration = float(st.session_state.bg_audio_clip.duration)
             
-            # Generate preview if video
+            # Generate preview if video (silently - don't show errors)
             if st.session_state.bg_is_video:
-                preview_end = min(3.0, st.session_state.bg_duration)
                 st.session_state.bg_preview_path = generate_video_preview(
                     st.session_state.bg_path, 
                     start_time=0.0, 
-                    end_time=preview_end,
+                    end_time=min(3.0, st.session_state.bg_duration),
                     height=200
                 )
             
@@ -216,12 +230,11 @@ with col2:
                 st.session_state.overlay_clip = VideoFileClip(st.session_state.overlay_path)
                 st.session_state.overlay_duration = float(st.session_state.overlay_clip.duration)
                 
-                # Generate preview
-                preview_end = min(3.0, st.session_state.overlay_duration)
+                # Generate preview (silently - don't show errors)
                 st.session_state.overlay_preview_path = generate_video_preview(
                     st.session_state.overlay_path,
                     start_time=0.0,
-                    end_time=preview_end,
+                    end_time=min(3.0, st.session_state.overlay_duration),
                     height=200
                 )
             
@@ -362,8 +375,8 @@ if st.button("🎬 Create Fullscreen Video", type="primary") and background_file
             # ----- STEP 1: EXTRACT AND TRIM AUDIO -----
             st.info("🎵 Extracting and trimming audio...")
             
-            # Create subclip for audio
-            audio_clip = st.session_state.bg_audio_clip.subclip(audio_start, audio_end)
+            # Create subclip for audio with explicit float conversion
+            audio_clip = st.session_state.bg_audio_clip.subclip(float(audio_start), float(audio_end))
             audio_duration = float(audio_clip.duration)
             st.info(f"Audio: {audio_duration:.1f} seconds (from {audio_start:.1f}s to {audio_end:.1f}s)")
             
@@ -447,7 +460,9 @@ if st.button("🎬 Create Fullscreen Video", type="primary") and background_file
                 overlay = st.session_state.overlay_clip
                 
                 # Trim overlay if needed (ensure float times)
-                overlay = overlay.subclip(float(overlay_start), float(overlay_end))
+                overlay_start_float = float(overlay_start)
+                overlay_end_float = float(overlay_end)
+                overlay = overlay.subclip(overlay_start_float, overlay_end_float)
                 overlay_duration = float(overlay.duration)
                 st.info(f"Overlay trimmed to: {overlay_duration:.1f} seconds")
                 
@@ -461,7 +476,8 @@ if st.button("🎬 Create Fullscreen Video", type="primary") and background_file
                     loops = int(np.ceil(audio_duration / overlay_duration))
                     overlay_loops = []
                     for _ in range(loops):
-                        overlay_loops.append(overlay.copy())
+                        overlay_copy = overlay.copy()
+                        overlay_loops.append(overlay_copy)
                     overlay = concatenate_videoclips(overlay_loops)
                     overlay = overlay.subclip(0, audio_duration)
                 elif overlay_duration > audio_duration:
