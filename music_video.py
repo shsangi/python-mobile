@@ -57,8 +57,12 @@ def resize_video_to_fit(clip, target_size):
     scale = min(target_w / clip_w, target_h / clip_h)
     new_w, new_h = int(clip_w * scale), int(clip_h * scale)
     
-    # Resize clip
-    resized = clip.resize((new_w, new_h))
+    # Make dimensions even (required for video encoding)
+    new_w = new_w if new_w % 2 == 0 else new_w - 1
+    new_h = new_h if new_h % 2 == 0 else new_h - 1
+    
+    # Resize clip using newsize parameter
+    resized = clip.resize(newsize=(new_w, new_h))
     
     # Create black background
     bg = ColorClip(size=target_size, color=(0, 0, 0), duration=clip.duration)
@@ -67,7 +71,7 @@ def resize_video_to_fit(clip, target_size):
     x_pos = (target_w - new_w) // 2
     y_pos = (target_h - new_h) // 2
     
-    return CompositeVideoClip([bg, resized.set_position((x_pos, y_pos))], duration=clip.duration)
+    return CompositeVideoClip([bg, resized.set_position((x_pos, y_pos))], size=target_size)
 
 # Upload section
 c1, c2 = st.columns(2)
