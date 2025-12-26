@@ -11,15 +11,15 @@ import moviepy
 from moviepy.editor import (
     VideoFileClip,
     AudioFileClip,
+    ImageClip,
     concatenate_videoclips,
-    CompositeVideoClip,
-    ColorClip
+    CompositeVideoClip
 )
 
-# Update version
-my_title = "🎬 Smart Mobile Video Maker V 25"
+# Update version for any change
+my_title = "🎬 Mobile Video Maker V 24"
 
-# ---------- PAGE CONFIG ----------
+# ---------- MOBILE-FRIENDLY PAGE CONFIG ----------
 st.set_page_config(
     page_title=my_title,
     layout="wide",
@@ -27,242 +27,451 @@ st.set_page_config(
     menu_items=None
 )
 
-# ---------- CSS ----------
+# ---------- MOBILE-OPTIMIZED CSS ----------
 st.markdown("""
 <style>
-    [data-testid="stSidebar"] { display: none; }
-    .stButton > button { width: 100%; min-height: 44px; }
-    @media (max-width: 768px) {
-        .main .block-container { padding: 1rem; }
-        h1 { font-size: 1.8rem !important; }
+    /* Hide sidebar completely */
+    [data-testid="stSidebar"] {
+        display: none;
+    }
+    
+    /* Mobile viewport optimization */
+    @media only screen and (max-width: 768px) {
+        /* Main container */
+        .main .block-container {
+            padding-top: 1rem;
+            padding-bottom: 1rem;
+            padding-left: 1rem;
+            padding-right: 1rem;
+        }
+        
+        /* Title and headers */
+        h1 {
+            font-size: 1.8rem !important;
+            margin-bottom: 0.5rem !important;
+        }
+        
+        h2, h3 {
+            font-size: 1.4rem !important;
+        }
+        
+        /* File uploader */
+        .stFileUploader {
+            font-size: 14px;
+        }
+        
+        .stFileUploader > label {
+            font-size: 14px !important;
+        }
+        
+        /* Sliders */
+        .stSlider {
+            padding: 0.5rem 0;
+        }
+        
+        .stSlider p {
+            font-size: 14px;
+            margin-bottom: 0.3rem;
+        }
+        
+        /* Buttons */
+        .stButton > button {
+            width: 100% !important;
+            margin: 0.5rem 0;
+            padding: 0.75rem;
+            font-size: 16px;
+            min-height: 44px;
+        }
+        
+        /* Columns */
+        .stColumn {
+            padding: 0.5rem;
+        }
+        
+        /* Video player */
+        video {
+            max-width: 100% !important;
+            height: auto !important;
+        }
+        
+        /* Metrics */
+        .stMetric {
+            padding: 0.5rem;
+        }
+        
+        .stMetric label {
+            font-size: 12px !important;
+        }
+        
+        .stMetric div {
+            font-size: 16px !important;
+        }
+        
+        /* Expandable sections */
+        .streamlit-expanderHeader {
+            font-size: 14px !important;
+            padding: 0.75rem 1rem;
+        }
+    }
+    
+    /* General mobile optimizations */
+    .stApp {
+        max-width: 100vw;
+        overflow-x: hidden;
+    }
+    
+    /* Prevent horizontal scrolling */
+    div[data-testid="stVerticalBlock"] {
+        width: 100% !important;
+        max-width: 100% !important;
+    }
+    
+    /* Better touch targets for all devices */
+    .stButton > button, .stDownloadButton > button {
+        min-height: 44px;
+        touch-action: manipulation;
+    }
+    
+    /* Loading spinner optimization */
+    .stSpinner > div {
+        margin: 1rem auto;
+    }
+    
+    /* Hide decorative elements on mobile */
+    @media (max-width: 480px) {
+        .stCaption {
+            font-size: 12px;
+        }
+        
+        .stAlert {
+            padding: 0.75rem;
+        }
     }
 </style>
 """, unsafe_allow_html=True)
 
 # ---------- APP TITLE ----------
 st.title(my_title)
-st.caption("📱 Smart detection - Keeps mobile videos as-is, converts only landscape videos")
+st.caption("📱 Always creates 9:16 portrait mobile videos")
 
 # ---------- SESSION STATE ----------
 session_defaults = {
-    'bg_clip': None, 'overlay_clip': None, 'bg_duration': 0, 'overlay_duration': 0,
-    'bg_path': None, 'overlay_path': None, 'bg_is_video': False, 'processing': False,
-    'prev_bg_file': None, 'prev_overlay_file': None, 'video_info': None
+    'bg_clip': None,
+    'overlay_clip': None,
+    'bg_duration': 0,
+    'overlay_duration': 0,
+    'bg_path': None,
+    'overlay_path': None,
+    'bg_is_video': False,
+    'overlay_is_image': False,
+    'prev_bg_file': None,
+    'prev_overlay_file': None,
+    'mobile_view': False,
+    'processing': False,
+    'last_output': None,
+    'target_resolution': (1080, 1920)  # Portrait 9:16 for mobile
 }
 
 for key, value in session_defaults.items():
     if key not in st.session_state:
         st.session_state[key] = value
 
-# ---------- TARGET RESOLUTIONS ----------
-PORTRAIT_HD = (1080, 1920)      # 9:16 Full HD Portrait
-PORTRAIT_SD = (720, 1280)       # 9:16 HD Portrait
-LANDSCAPE_HD = (1920, 1080)     # 16:9 Full HD
+# ---------- PORTRAIT VIDEO SETTINGS ----------
+PORTRAIT_WIDTH = 1080
+PORTRAIT_HEIGHT = 1920
+PORTRAIT_RESOLUTION = (PORTRAIT_WIDTH, PORTRAIT_HEIGHT)
+ASPECT_RATIO = 9/16  # Portrait mobile
 
-# ---------- HELPER FUNCTIONS ----------
+# ---------- MOBILE DETECTION ----------
+def detect_mobile():
+    """Detect if user is on mobile device"""
+    try:
+        from streamlit.runtime.scriptrunner import get_script_run_ctx
+        ctx = get_script_run_ctx()
+        if ctx:
+            user_agent = ctx.request.headers.get('User-Agent', '').lower()
+            mobile_keywords = ['mobile', 'android', 'iphone', 'ipad', 'tablet']
+            return any(keyword in user_agent for keyword in mobile_keywords)
+    except:
+        pass
+    return False
+
+# Update mobile detection
+st.session_state.mobile_view = detect_mobile()
+
+# ---------- MOBILE-OPTIMIZED HELPER FUNCTIONS ----------
 def save_uploaded_file(uploaded_file):
     """Save uploaded file to temp location"""
     try:
+        # Check file size (limit to 500MB for mobile)
+        max_size_mb = 500
+        file_size = len(uploaded_file.getvalue()) / (1024 * 1024)
+        
+        if file_size > max_size_mb:
+            st.error(f"File too large ({file_size:.1f}MB). Maximum size is {max_size_mb}MB for mobile devices.")
+            return None
+            
         temp_file = tempfile.NamedTemporaryFile(
             delete=False, 
             suffix=os.path.splitext(uploaded_file.name)[1]
         )
         temp_file.write(uploaded_file.getvalue())
         temp_file.close()
+        
         return temp_file.name
     except Exception as e:
         st.error(f"Error saving file: {str(e)}")
         return None
 
-def analyze_video(video_path):
-    """Analyze video properties and determine best output format"""
-    try:
-        clip = VideoFileClip(video_path, audio=False)
-        width, height = clip.size
-        aspect_ratio = width / height
-        
-        # Determine video type
-        if height > width:  # Portrait
-            video_type = "portrait"
-            target_resolution = (min(1080, width), min(1920, height))  # Keep original or max 1080x1920
-        elif width > height:  # Landscape
-            video_type = "landscape"
-            # For landscape, convert to portrait with smart cropping
-            target_resolution = PORTRAIT_HD
-        else:  # Square
-            video_type = "square"
-            target_resolution = PORTRAIT_SD
-        
-        info = {
-            'width': width,
-            'height': height,
-            'aspect_ratio': round(aspect_ratio, 2),
-            'video_type': video_type,
-            'target_resolution': target_resolution,
-            'fps': clip.fps if hasattr(clip, 'fps') else 30,
-            'duration': clip.duration
-        }
-        
-        clip.close()
-        return info
-        
-    except Exception as e:
-        st.error(f"Error analyzing video: {str(e)}")
-        return None
-
-def show_preview(video_path):
-    """Show preview of video"""
+def show_single_frame_preview(video_path, time_point=1):
+    """Show a single frame from video"""
     try:
         clip = VideoFileClip(video_path, audio=False)
         if clip.duration == 0:
             clip.close()
             return None
+            
+        if time_point > clip.duration:
+            time_point = clip.duration / 2
         
-        # Get frame at 1 second or middle
-        time_point = min(1, clip.duration / 2)
         frame = clip.get_frame(time_point)
         img = Image.fromarray(frame)
         
-        # Create thumbnail
-        img.thumbnail((300, 300))
+        # Create portrait preview
+        preview_width = 200
+        # Calculate height to maintain original aspect ratio
+        original_height, original_width = frame.shape[:2]
+        original_aspect = original_width / original_height
         
-        # Add aspect ratio info
-        width, height = clip.size
-        clip.close()
-        
-        return img, width, height
-    except:
-        return None, 0, 0
-
-def resize_for_mobile(clip, video_info):
-    """Smart resize for mobile - only convert if needed"""
-    try:
-        width, height = clip.size
-        target_width, target_height = video_info['target_resolution']
-        
-        # If already mobile portrait and similar size, keep as-is
-        if video_info['video_type'] == 'portrait':
-            # Check if close enough to target (within 10%)
-            width_diff = abs(width - target_width) / target_width
-            height_diff = abs(height - target_height) / target_height
-            
-            if width_diff < 0.1 and height_diff < 0.1:
-                # Already mobile portrait, no resize needed
-                return clip
-            else:
-                # Resize to target maintaining aspect ratio
-                return clip.resize((target_width, target_height))
-        
-        elif video_info['video_type'] == 'landscape':
-            # Convert landscape to portrait with smart crop
-            return convert_landscape_to_portrait(clip, target_width, target_height)
-        
-        else:  # Square
-            # Convert square to portrait with padding
-            return convert_square_to_portrait(clip, target_width, target_height)
-            
-    except Exception as e:
-        st.error(f"Error resizing: {str(e)}")
-        return clip
-
-def convert_landscape_to_portrait(clip, target_width, target_height):
-    """Convert landscape video to portrait with smart cropping"""
-    try:
-        width, height = clip.size
-        
-        # Method 1: Crop center (good for talking heads in center)
-        crop_width = width
-        crop_height = int(width * (target_height / target_width))  # Maintain 9:16
-        
-        if crop_height <= height:
-            # Can crop from center
-            y1 = (height - crop_height) // 2
-            y2 = y1 + crop_height
-            return clip.crop(y1=y1, y2=y2).resize((target_width, target_height))
+        if original_aspect > 0.5:  # Likely portrait
+            preview_height = int(preview_width / original_aspect)
         else:
-            # Need to scale first
-            scale = target_width / width
-            new_height = int(height * scale)
-            resized = clip.resize((target_width, new_height))
-            
-            # Then crop or pad
-            if new_height >= target_height:
-                # Crop from center
-                y1 = (new_height - target_height) // 2
-                return resized.crop(y1=y1, y2=y1 + target_height)
-            else:
-                # Add black bars
-                x_pos = 0
-                y_pos = (target_height - new_height) // 2
-                
-                background = ColorClip(
-                    size=(target_width, target_height),
-                    color=(0, 0, 0),
-                    duration=clip.duration
-                )
-                
-                return CompositeVideoClip([
-                    background,
-                    resized.set_position((x_pos, y_pos))
-                ])
-                
+            preview_height = int(preview_width * (16/9))  # Default to 9:16
+        
+        img = img.resize((preview_width, preview_height), Image.Resampling.LANCZOS)
+        
+        clip.close()
+        return img
     except Exception as e:
-        st.error(f"Error converting landscape: {str(e)}")
-        return clip.resize((target_width, target_height))
+        st.warning(f"Preview unavailable: {str(e)}")
+        return None
 
-def convert_square_to_portrait(clip, target_width, target_height):
-    """Convert square video to portrait"""
+def resize_for_portrait(clip):
+    """Resize video clip to fit portrait mobile dimensions - SMART DETECTION"""
     try:
-        width, height = clip.size
+        original_width, original_height = clip.size
+        target_width, target_height = PORTRAIT_RESOLUTION
         
-        # Scale to target width
-        scale = target_width / width
-        new_height = int(height * scale)
-        resized = clip.resize((target_width, new_height))
+        # Calculate original aspect ratio
+        original_aspect = original_width / original_height
+        target_aspect = target_width / target_height  # 9/16 = 0.5625
         
-        # Add black bars top and bottom
-        x_pos = 0
+        st.info(f"Original: {original_width}x{original_height} (ratio: {original_aspect:.3f}), Target: {target_width}x{target_height} (ratio: {target_aspect:.3f})")
+        
+        # If already close to 9:16 portrait (within 10%)
+        if abs(original_aspect - target_aspect) < 0.1:
+            # Just resize to target dimensions
+            resized_clip = clip.resize(PORTRAIT_RESOLUTION)
+            return resized_clip
+        
+        # If video is already portrait (taller than wide)
+        elif original_aspect < 1:
+            # For portrait videos, preserve aspect ratio and fit within frame
+            scale_width = target_width / original_width
+            scale_height = target_height / original_height
+            
+            # Use the smaller scale to fit content (no cropping)
+            scale = min(scale_width, scale_height)
+            
+            new_width = int(original_width * scale)
+            new_height = int(original_height * scale)
+            
+            # Resize the clip
+            resized_clip = clip.resize((new_width, new_height))
+            
+            # Calculate position to center
+            x_pos = (target_width - new_width) // 2
+            y_pos = (target_height - new_height) // 2
+            
+            # Create black background
+            bg_clip = ColorClip(PORTRAIT_RESOLUTION, color=(0, 0, 0)).set_duration(clip.duration)
+            
+            # Composite resized clip over black background
+            final_clip = CompositeVideoClip([
+                bg_clip,
+                resized_clip.set_position((x_pos, y_pos))
+            ])
+            
+            return final_clip
+            
+        else:
+            # For landscape videos, use the original crop method
+            scale_width = target_width / original_width
+            scale_height = target_height / original_height
+            
+            # Use the larger scale to fill the frame
+            scale = max(scale_width, scale_height)
+            
+            new_width = int(original_width * scale)
+            new_height = int(original_height * scale)
+            
+            # Resize the clip
+            resized_clip = clip.resize((new_width, new_height))
+            
+            # Calculate crop to get exact portrait dimensions
+            crop_x = (new_width - target_width) // 2
+            crop_y = (new_height - target_height) // 2
+            
+            # Crop to portrait dimensions
+            cropped_clip = resized_clip.crop(
+                x1=crop_x,
+                y1=crop_y,
+                x2=crop_x + target_width,
+                y2=crop_y + target_height
+            )
+            
+            return cropped_clip
+            
+    except Exception as e:
+        st.error(f"Error resizing for portrait: {str(e)}")
+        return clip  # Return original if resize fails
+
+def fit_content_to_portrait(clip):
+    """Fit content within portrait frame with black background (no blur)"""
+    try:
+        original_width, original_height = clip.size
+        target_width, target_height = PORTRAIT_RESOLUTION
+        
+        # Calculate original aspect ratio
+        original_aspect = original_width / original_height
+        
+        st.info(f"Fitting: {original_width}x{original_height} (ratio: {original_aspect:.3f}) into {target_width}x{target_height}")
+        
+        # Calculate scale to fit within portrait (maintain aspect ratio)
+        scale_width = target_width / original_width
+        scale_height = target_height / original_height
+        
+        # Use the smaller scale to fit content (no cropping)
+        scale = min(scale_width, scale_height)
+        
+        new_width = int(original_width * scale)
+        new_height = int(original_height * scale)
+        
+        # Resize the clip
+        resized_clip = clip.resize((new_width, new_height))
+        
+        # Calculate position to center
+        x_pos = (target_width - new_width) // 2
         y_pos = (target_height - new_height) // 2
         
-        background = ColorClip(
-            size=(target_width, target_height),
-            color=(0, 0, 0),
-            duration=clip.duration
-        )
+        # Create black background
+        bg_clip = ColorClip(PORTRAIT_RESOLUTION, color=(0, 0, 0)).set_duration(clip.duration)
         
-        return CompositeVideoClip([
-            background,
-            resized.set_position((x_pos, y_pos))
+        # Composite resized clip over black background
+        final_clip = CompositeVideoClip([
+            bg_clip,
+            resized_clip.set_position((x_pos, y_pos))
         ])
         
+        return final_clip
+        
     except Exception as e:
-        st.error(f"Error converting square: {str(e)}")
-        return clip.resize((target_width, target_height))
+        st.error(f"Error fitting content: {str(e)}")
+        return clip
 
-# ---------- UPLOAD SECTIONS ----------
+def create_portrait_video(original_clip, fit_method='fit'):
+    """Create portrait mobile video from any aspect ratio"""
+    try:
+        # Show what we're working with
+        original_width, original_height = original_clip.size
+        original_aspect = original_width / original_height
+        
+        st.info(f"Creating portrait video from {original_width}x{original_height} (aspect: {original_aspect:.3f})")
+        
+        if fit_method == 'crop':
+            # Only crop if it's a landscape video
+            if original_aspect > 1.2:  # Landscape-ish
+                st.info("Detected landscape video, using crop method")
+                return resize_for_portrait(original_clip)
+            else:
+                st.info("Detected portrait/square video, using fit method instead")
+                return fit_content_to_portrait(original_clip)
+        else:  # 'fit'
+            return fit_content_to_portrait(original_clip)
+    except Exception as e:
+        st.error(f"Error creating portrait video: {str(e)}")
+        return original_clip
+
+# ---------- MOBILE-FRIENDLY UPLOAD SECTIONS ----------
 st.subheader("📤 Upload Files")
 
-col1, col2 = st.columns(2)
+# Display target resolution info
+st.info(f"🎯 **Target Output:** {PORTRAIT_WIDTH}×{PORTRAIT_HEIGHT} (9:16 Portrait Mobile)")
 
-with col1:
+# Use different layout for mobile vs desktop
+if st.session_state.mobile_view:
+    # Single column for mobile
+    st.markdown("### Background Audio/Video")
     background_file = st.file_uploader(
-        "Background Audio/Video",
+        "Choose background file (MP3, MP4, MOV, M4A)",
         type=["mp3", "mp4", "mov", "m4a"],
-        help="Audio will be extracted from this file"
+        help="Audio will be extracted from this file",
+        label_visibility="collapsed",
+        key="bg_mobile"
     )
-
-with col2:
+    
+    st.markdown("---")
+    st.markdown("### Overlay Video")
     overlay_file = st.file_uploader(
-        "Overlay Video",
+        "Choose overlay video (MP4, MOV)",
         type=["mp4", "mov"],
-        help="Video will be smart-converted for mobile"
+        help="Video will be converted to portrait 9:16",
+        label_visibility="collapsed",
+        key="overlay_mobile"
     )
+else:
+    # Two columns for desktop
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        background_file = st.file_uploader(
+            "Background Audio/Video",
+            type=["mp3", "mp4", "mov", "m4a"],
+            help="Audio will be extracted from this file"
+        )
+    
+    with col2:
+        overlay_file = st.file_uploader(
+            "Overlay Video",
+            type=["mp4", "mov"],
+            help="Video will be converted to portrait 9:16"
+        )
+
+# ---------- FIT METHOD SELECTION ----------
+st.subheader("📐 Portrait Conversion Method")
+fit_method = st.radio(
+    "Choose how to fit your video to portrait:",
+    options=['Fit with Black Background', 'Crop to Fill (Only for landscape videos)'],
+    index=0,
+    horizontal=not st.session_state.mobile_view,
+    help="Fit: Shows full video with black bars | Crop: Fills screen (may crop edges)"
+)
+
+# Map selection to method parameter
+fit_method_param = 'crop' if fit_method == 'Crop to Fill (Only for landscape videos)' else 'fit'
 
 # ---------- BACKGROUND FILE HANDLING ----------
-if background_file and st.session_state.prev_bg_file != background_file.name:
-    st.session_state.prev_bg_file = background_file.name
+if background_file:
+    if st.session_state.prev_bg_file != background_file.name:
+        if st.session_state.bg_clip:
+            try:
+                st.session_state.bg_clip.close()
+            except:
+                pass
+        st.session_state.bg_clip = None
+        st.session_state.prev_bg_file = background_file.name
     
-    with st.spinner("Loading background..."):
+    with st.spinner("Loading background..." if not st.session_state.mobile_view else "📥 Loading..."):
         bg_path = save_uploaded_file(background_file)
         if bg_path:
             st.session_state.bg_path = bg_path
@@ -275,150 +484,155 @@ if background_file and st.session_state.prev_bg_file != background_file.name:
                     audio = st.session_state.bg_clip.audio
                     if audio:
                         st.session_state.bg_duration = audio.duration
-                        st.success(f"✅ Video loaded: {st.session_state.bg_duration:.1f}s")
+                        emoji = "📹" if st.session_state.mobile_view else "✅"
+                        st.success(f"{emoji} Video loaded: {st.session_state.bg_duration:.1f}s")
                     else:
                         st.error("⚠️ No audio in video")
+                        st.session_state.bg_clip = None
                 else:
                     audio = AudioFileClip(st.session_state.bg_path)
                     st.session_state.bg_duration = audio.duration
                     audio.close()
-                    st.success(f"✅ Audio loaded: {st.session_state.bg_duration:.1f}s")
+                    emoji = "🎵" if st.session_state.mobile_view else "✅"
+                    st.success(f"{emoji} Audio loaded: {st.session_state.bg_duration:.1f}s")
                     
             except Exception as e:
-                st.error(f"❌ Error: {str(e)}")
+                st.error(f"❌ Error: {str(e)[:100]}...")
 
 # ---------- OVERLAY FILE HANDLING ----------
-if overlay_file and st.session_state.prev_overlay_file != overlay_file.name:
-    st.session_state.prev_overlay_file = overlay_file.name
+if overlay_file:
+    if st.session_state.prev_overlay_file != overlay_file.name:
+        if st.session_state.overlay_clip:
+            try:
+                st.session_state.overlay_clip.close()
+            except:
+                pass
+        st.session_state.overlay_clip = None
+        st.session_state.prev_overlay_file = overlay_file.name
     
-    with st.spinner("Analyzing video..."):
+    with st.spinner("Loading overlay..." if not st.session_state.mobile_view else "📥 Loading video..."):
         overlay_path = save_uploaded_file(overlay_file)
         if overlay_path:
             st.session_state.overlay_path = overlay_path
+            st.session_state.overlay_is_image = False
             
             try:
-                # Load and analyze video
-                st.session_state.overlay_clip = VideoFileClip(overlay_path, audio=False)
+                st.session_state.overlay_clip = VideoFileClip(st.session_state.overlay_path, audio=False)
                 st.session_state.overlay_duration = st.session_state.overlay_clip.duration
                 
-                # Analyze video properties
-                st.session_state.video_info = analyze_video(overlay_path)
+                # Show original dimensions
+                orig_width, orig_height = st.session_state.overlay_clip.size
+                orig_aspect = orig_width / orig_height
                 
-                if st.session_state.video_info:
-                    info = st.session_state.video_info
-                    width, height = info['width'], info['height']
-                    target_w, target_h = info['target_resolution']
-                    
-                    st.success(f"✅ {overlay_file.name} loaded: {st.session_state.overlay_duration:.1f}s")
-                    
-                    # Show video info
-                    col1, col2, col3 = st.columns(3)
-                    with col1:
-                        st.metric("Original", f"{width}×{height}")
-                    with col2:
-                        st.metric("Type", info['video_type'].title())
-                    with col3:
-                        st.metric("Target", f"{target_w}×{target_h}")
-                    
-                    # Show preview
-                    preview_img, preview_w, preview_h = show_preview(overlay_path)
-                    if preview_img:
-                        st.image(preview_img, caption=f"Preview ({preview_w}×{preview_h})", use_container_width=True)
-                    
-                    # Show conversion note
-                    if info['video_type'] == 'portrait':
-                        st.info(f"📱 This is already a mobile portrait video. Will be kept at {target_w}×{target_h}")
-                    elif info['video_type'] == 'landscape':
-                        st.warning(f"🔄 Landscape video will be converted to portrait {target_w}×{target_h}")
-                    else:
-                        st.info(f"⬛ Square video will be converted to portrait {target_w}×{target_h}")
+                # Determine if video is already portrait
+                is_portrait = orig_aspect < 1
+                aspect_info = f"Portrait ({orig_aspect:.3f})" if is_portrait else f"Landscape ({orig_aspect:.3f})"
+                
+                st.info(f"📱 Original: {orig_width}×{orig_height} ({aspect_info}) → Will convert to: {PORTRAIT_WIDTH}×{PORTRAIT_HEIGHT}")
+                
+                # Show preview
+                preview_img = show_single_frame_preview(st.session_state.overlay_path)
+                if preview_img:
+                    caption = f"Preview - {orig_width}×{orig_height}"
+                    st.image(preview_img, caption=caption, use_container_width=True)
                     
             except Exception as e:
-                st.error(f"❌ Error: {str(e)}")
+                st.error(f"❌ Error: {str(e)[:100]}...")
 
-# ---------- TRIM SETTINGS ----------
+# ---------- MOBILE-FRIENDLY TRIM SLIDERS ----------
 if st.session_state.bg_duration > 0:
     st.subheader("✂️ Trim Settings")
     
-    col1, col2 = st.columns(2)
+    # Mobile-optimized audio trim
+    st.markdown("**Audio**" if st.session_state.mobile_view else "**Audio Duration**")
     
+    step_size = 0.1 if st.session_state.bg_duration < 60 else 0.5
+    
+    col1, col2 = st.columns(2)
     with col1:
         audio_start = st.slider(
-            "Audio Start (seconds)",
+            "Start (seconds)",
             0.0,
             float(st.session_state.bg_duration),
             0.0,
-            0.5,
+            step_size,
             key="audio_start"
         )
     
     with col2:
         max_audio_duration = st.session_state.bg_duration - audio_start
-        default_duration = min(30.0, float(max_audio_duration))
+        default_duration = min(60.0, float(max_audio_duration))
         
         audio_duration = st.slider(
-            "Audio Duration (seconds)",
+            "Duration (seconds)",
             1.0,
             float(max_audio_duration),
             default_duration,
-            0.5,
+            step_size,
             key="audio_duration"
         )
     
     audio_end = audio_start + audio_duration
-    st.success(f"🎵 Audio: {audio_start:.1f}s to {audio_end:.1f}s ({audio_duration:.1f}s total)")
+    duration_text = f"{audio_start:.1f}s to {audio_end:.1f}s ({audio_duration:.1f}s)"
+    st.success(f"🎵 Audio: {duration_text}")
 
 if st.session_state.overlay_duration > 0:
-    col1, col2 = st.columns(2)
+    st.markdown("**Overlay Video**" if st.session_state.mobile_view else "**Overlay Video Trim**")
     
+    step_size = 0.1 if st.session_state.overlay_duration < 60 else 0.5
+    
+    col1, col2 = st.columns(2)
     with col1:
         overlay_start = st.slider(
-            "Overlay Start (seconds)",
+            "Start (seconds)",
             0.0,
             float(st.session_state.overlay_duration),
             0.0,
-            0.5,
+            step_size,
             key="overlay_start"
         )
     
     with col2:
         max_overlay_duration = st.session_state.overlay_duration - overlay_start
-        default_duration = min(30.0, float(max_overlay_duration))
+        default_duration = min(60.0, float(max_overlay_duration))
         
         overlay_duration = st.slider(
-            "Overlay Duration (seconds)",
+            "Duration (seconds)",
             1.0,
             float(max_overlay_duration),
             default_duration,
-            0.5,
+            step_size,
             key="overlay_duration"
         )
     
     overlay_end = overlay_start + overlay_duration
-    st.success(f"📹 Overlay: {overlay_start:.1f}s to {overlay_end:.1f}s ({overlay_duration:.1f}s total)")
+    duration_text = f"{overlay_start:.1f}s to {overlay_end:.1f}s ({overlay_duration:.1f}s)"
+    st.success(f"📹 Overlay: {duration_text}")
 
-# ---------- PROCESS FUNCTION ----------
-def process_smart_video():
-    """Smart processing - keeps mobile videos as-is, converts others"""
+# ---------- MOBILE-OPTIMIZED PROCESS FUNCTION (ALWAYS PORTRAIT) ----------
+def process_portrait_video():
+    """Combine audio and video, ALWAYS output portrait mobile dimensions"""
     try:
+        # Set processing flag
         st.session_state.processing = True
         
         # Get trim values
         audio_start = st.session_state.get('audio_start', 0)
         audio_duration_val = st.session_state.get('audio_duration', 
-                                                 min(30, st.session_state.bg_duration))
+                                                 min(60, st.session_state.bg_duration))
         audio_end = audio_start + audio_duration_val
         
         overlay_start = st.session_state.get('overlay_start', 0)
         overlay_duration_val = st.session_state.get('overlay_duration',
-                                                   min(30, st.session_state.overlay_duration))
+                                                   min(60, st.session_state.overlay_duration))
         overlay_end = overlay_start + overlay_duration_val
         
-        # Progress bar
-        progress_bar = st.progress(0, text="Starting...")
+        # Progress tracking
+        progress_bar = st.progress(0, text="Starting processing...")
+        time.sleep(0.1)
         
         # Extract audio
-        progress_bar.progress(20, text="Extracting audio...")
+        progress_bar.progress(10, text="Extracting audio...")
         if st.session_state.bg_is_video and st.session_state.bg_clip:
             audio_clip = st.session_state.bg_clip.audio.subclip(audio_start, audio_end)
         else:
@@ -426,12 +640,12 @@ def process_smart_video():
         
         final_audio_duration = audio_clip.duration
         
-        # Trim overlay
-        progress_bar.progress(40, text="Trimming overlay...")
+        # Process overlay video - trim first
+        progress_bar.progress(30, text="Trimming overlay...")
         overlay = st.session_state.overlay_clip.subclip(overlay_start, overlay_end)
         
         # Match durations
-        progress_bar.progress(60, text="Matching durations...")
+        progress_bar.progress(40, text="Matching durations...")
         if overlay.duration < final_audio_duration:
             loops_needed = int(final_audio_duration / overlay.duration) + 1
             overlay_loops = [overlay] * loops_needed
@@ -440,57 +654,63 @@ def process_smart_video():
         elif overlay.duration > final_audio_duration:
             overlay = overlay.subclip(0, final_audio_duration)
         
-        # Smart resize for mobile
-        progress_bar.progress(80, text="Optimizing for mobile...")
+        # Convert to portrait mobile dimensions
+        progress_bar.progress(60, text=f"Converting to portrait {PORTRAIT_WIDTH}×{PORTRAIT_HEIGHT}...")
+        portrait_overlay = create_portrait_video(overlay, fit_method_param)
         
-        if st.session_state.video_info:
-            # Use smart resize based on video type
-            mobile_video = resize_for_mobile(overlay, st.session_state.video_info)
-        else:
-            # Fallback to portrait
-            mobile_video = overlay.resize(PORTRAIT_HD)
-        
-        # Add audio
-        progress_bar.progress(90, text="Adding audio...")
-        final_video = mobile_video.set_audio(audio_clip)
+        # Add audio to portrait video
+        progress_bar.progress(80, text="Adding audio...")
+        final_video = portrait_overlay.set_audio(audio_clip)
         final_video = final_video.set_duration(final_audio_duration)
         
         # Save video
-        progress_bar.progress(95, text="Saving video...")
-        output_path = tempfile.NamedTemporaryFile(delete=False, suffix="_mobile.mp4").name
+        progress_bar.progress(90, text="Encoding video...")
+        output_path = tempfile.NamedTemporaryFile(delete=False, suffix="_portrait.mp4").name
         
-        # Get final dimensions
-        final_width, final_height = mobile_video.size
+        # Get actual dimensions after conversion
+        final_width, final_height = portrait_overlay.size
         
-        # Write video
+        # Optimized encoding for mobile
+        fps = 30  # Standard for mobile
+        bitrate = "8M"  # Good quality for portrait
+        
         final_video.write_videofile(
             output_path,
-            fps=30,
+            fps=fps,
             codec="libx264",
             audio_codec="aac",
-            bitrate="8M",
+            bitrate=bitrate,
             verbose=False,
             logger=None,
             preset='medium',
-            ffmpeg_params=['-movflags', '+faststart']
+            ffmpeg_params=[
+                '-movflags', '+faststart',
+                '-pix_fmt', 'yuv420p',  # Better mobile compatibility
+                '-profile:v', 'high',
+                '-level', '4.2'
+            ]
         )
         
         progress_bar.progress(100, text="Complete!")
         time.sleep(0.5)
         progress_bar.empty()
         
-        # Cleanup
+        # Cleanup clips
         audio_clip.close()
         overlay.close()
-        mobile_video.close()
+        portrait_overlay.close()
         final_video.close()
+        
+        # Store output
+        st.session_state.last_output = output_path
         
         return output_path, final_audio_duration, final_width, final_height
         
     except Exception as e:
         st.error(f"❌ Processing error: {str(e)}")
         import traceback
-        st.code(traceback.format_exc())
+        with st.expander("Error details"):
+            st.code(traceback.format_exc())
         return None, 0, 0, 0
     finally:
         st.session_state.processing = False
@@ -498,61 +718,85 @@ def process_smart_video():
 # ---------- CREATE BUTTON ----------
 st.divider()
 
+# Check if both files are uploaded
 files_ready = st.session_state.bg_path and st.session_state.overlay_path
-button_text = "⏳ Processing..." if st.session_state.processing else "🎬 Create Smart Mobile Video"
+
+# Create button
+create_disabled = not files_ready or st.session_state.processing
+button_text = "⏳ Processing..." if st.session_state.processing else f"🎬 Create {PORTRAIT_WIDTH}×{PORTRAIT_HEIGHT} Portrait Video"
 
 if st.button(
     button_text,
     type="primary",
-    disabled=not files_ready or st.session_state.processing,
-    use_container_width=True
+    disabled=create_disabled,
+    use_container_width=True,
+    key="create_button"
 ):
     if not files_ready:
         st.warning("Please upload both files first")
         st.stop()
     
-    # Show processing info
-    if st.session_state.video_info:
-        info = st.session_state.video_info
-        st.info(f"🔄 Processing: {info['width']}×{info['height']} {info['video_type']} → {info['target_resolution'][0]}×{info['target_resolution'][1]}")
+    # Show conversion info
+    orig_width, orig_height = st.session_state.overlay_clip.size
+    orig_aspect = orig_width / orig_height
+    
+    if orig_aspect < 1:
+        st.info(f"📱 Detected portrait video ({orig_width}×{orig_height}) - Will preserve original look with black bars")
+    else:
+        st.info(f"🔄 Converting from {orig_width}×{orig_height} to {PORTRAIT_WIDTH}×{PORTRAIT_HEIGHT} portrait...")
     
     # Process video
-    output_path, duration, width, height = process_smart_video()
+    output_path, duration, width, height = process_portrait_video()
     
     if output_path and os.path.exists(output_path):
         st.balloons()
-        st.success(f"✅ Mobile video created: {width}×{height}")
+        st.success(f"✅ Portrait mobile video created successfully!")
         
         # Show video
-        st.subheader("🎥 Your Mobile Video")
+        st.subheader("📱 Your Portrait Mobile Video")
         
+        # Display video with controls
         try:
-            video_bytes = open(output_path, "rb").read()
-            st.video(video_bytes)
-        except:
-            st.info("Video ready for download")
+            with open(output_path, "rb") as video_file:
+                video_bytes = video_file.read()
+            st.video(video_bytes, format="video/mp4")
+        except Exception as e:
+            st.info("Video preview available - use download button below")
         
-        # Show info
+        # Show video info
         file_size = os.path.getsize(output_path) / (1024 * 1024)
         
-        col1, col2, col3 = st.columns(3)
+        # Display info in columns
+        col1, col2, col3, col4 = st.columns(4)
         with col1:
             st.metric("Duration", f"{duration:.1f}s")
         with col2:
             st.metric("Resolution", f"{width}×{height}")
         with col3:
+            st.metric("Aspect", "9:16")
+        with col4:
             st.metric("Size", f"{file_size:.1f}MB")
         
         # Download button
         with open(output_path, "rb") as f:
+            video_data = f.read()
+            
+            # Generate filename with resolution
+            filename = f"mobile_portrait_{PORTRAIT_WIDTH}x{PORTRAIT_HEIGHT}.mp4"
+            
             st.download_button(
-                "📥 Download Video",
-                f.read(),
-                file_name=f"mobile_video_{width}x{height}.mp4",
+                "📥 Download Portrait Video",
+                video_data,
+                file_name=filename,
                 mime="video/mp4",
                 type="primary",
-                use_container_width=True
+                use_container_width=True,
+                help=f"Download {PORTRAIT_WIDTH}×{PORTRAIT_HEIGHT} portrait video for mobile"
             )
+        
+        # Mobile tips
+        if st.session_state.mobile_view:
+            st.caption("📱 **Mobile Tips:** This video is optimized for Instagram Reels, TikTok, and Stories")
         
         # Cleanup
         try:
@@ -563,7 +807,7 @@ if st.button(
         except:
             pass
         
-        # Clear session
+        # Clear session clips
         if st.session_state.bg_clip:
             try:
                 st.session_state.bg_clip.close()
@@ -580,62 +824,126 @@ if st.button(
         
         gc.collect()
 
-# ---------- HOW IT WORKS ----------
-with st.expander("📖 How It Works", expanded=True):
-    st.markdown("""
-    ### Smart Mobile Video Maker
+# ---------- PORTRAIT VIDEO GUIDE ----------
+with st.expander("📱 Portrait Mobile Video Guide", expanded=True):
+    st.markdown(f"""
+    ### Smart Portrait Video Creation
     
-    **Key Features:**
+    **This app intelligently handles different video formats:**
     
-    1. **Smart Detection**
-       - Detects if video is already mobile/portrait
-       - Keeps mobile videos as-is (no unnecessary resizing)
-       - Only converts landscape videos to portrait
+    ### 📐 **Smart Conversion Logic:**
     
-    2. **Intelligent Conversion**
-       - **Portrait videos:** Keeps original size (up to 1080×1920)
-       - **Landscape videos:** Smart crop to 9:16 portrait
-       - **Square videos:** Adds black bars for portrait
+    1. **For Portrait Videos (taller than wide):**
+       - Preserves original aspect ratio
+       - Fits within {PORTRAIT_WIDTH}×{PORTRAIT_HEIGHT} frame
+       - Adds black bars if needed
+       - **No cropping or stretching**
+       - Original people/content look normal
     
-    3. **Preserves Quality**
-       - No stretching or unnatural resizing
-       - Maintains aspect ratio
-       - Keeps important content centered
+    2. **For Landscape Videos (wider than tall):**
+       - Fills entire {PORTRAIT_WIDTH}×{PORTRAIT_HEIGHT} frame
+       - Crops edges if needed
+       - No black bars
     
-    **What Happens:**
-    1. Upload your video
-    2. App analyzes video type (portrait/landscape/square)
-    3. Smart conversion based on original format
-    4. Audio is trimmed and added
-    5. Output optimized for mobile platforms
+    ### 🎯 **How to Get What You Want:**
     
-    **Best Results:**
-    - Upload mobile/portrait videos as-is
-    - For landscape videos, important content should be centered
-    - Use high-quality source videos
+    **If your overlay video is already mobile/portrait:**
+    - Choose "Fit with Black Background" 
+    - Your video will look exactly as it does on your phone
+    - People will be normal size, not stretched
+    
+    **If your overlay video is landscape:**
+    - Choose "Crop to Fill"
+    - Video will fill the screen
+    - Some edges may be cropped
+    
+    ### 📱 **Mobile Platform Optimizations:**
+    
+    **Instagram Reels / TikTok:**
+    - Perfect {PORTRAIT_WIDTH}×{PORTRAIT_HEIGHT} format
+    - High quality encoding
+    - Fast loading
+    
+    **YouTube Shorts:**
+    - 9:16 aspect ratio
+    - Vertical video optimized
+    - Mobile-first design
+    
+    **Stories (Instagram/Facebook):**
+    - Full-screen vertical video
+    - Ready to share
+    
+    ### ⚙️ **Technical Specifications:**
+    - **Output Resolution:** {PORTRAIT_WIDTH}×{PORTRAIT_HEIGHT} pixels
+    - **Aspect Ratio:** 9:16 (perfect portrait)
+    - **Format:** MP4 (H.264 + AAC)
+    - **FPS:** 30 (smooth playback)
+    - **Bitrate:** 8 Mbps (high quality)
+    
+    ### 💡 **Tips for Best Results:**
+    1. **For mobile videos:** Use "Fit with Black Background"
+    2. **For landscape videos:** Use "Crop to Fill"
+    3. **Keep important content centered** 
+    4. **For talking heads:** They will remain normal size
+    5. **Original quality:** Use at least 720p for best results
+    
+    ### 🔄 **What Happens to Your Mobile Video:**
+    1. Upload your mobile video (already portrait)
+    2. App detects it's portrait format
+    3. Video is fitted within {PORTRAIT_WIDTH}×{PORTRAIT_HEIGHT}
+    4. Audio is added and synced
+    5. Output looks exactly like your original
     """)
 
-# ---------- FOOTER ----------
+# ---------- COMPATIBILITY INFO ----------
 st.divider()
-st.caption("Smart Mobile Video Maker • Preserves mobile videos • Intelligent conversion • V25")
+st.caption(f"🎯 **Output:** Always {PORTRAIT_WIDTH}×{PORTRAIT_HEIGHT} Portrait • 📱 Mobile-Optimized • 🚀 Fast Processing • V24")
 
-# ---------- CLEANUP ----------
+# ---------- ADDITIONAL MOBILE OPTIMIZATIONS ----------
+if st.session_state.mobile_view:
+    st.markdown("""
+    <script>
+    // Mobile-specific optimizations
+    document.addEventListener('DOMContentLoaded', function() {
+        // Force portrait orientation for video playback
+        const videos = document.querySelectorAll('video');
+        videos.forEach(video => {
+            video.setAttribute('playsinline', '');
+            video.setAttribute('webkit-playsinline', '');
+            video.setAttribute('x5-playsinline', '');
+            video.setAttribute('x5-video-player-type', 'h5');
+            video.setAttribute('x5-video-player-fullscreen', 'false');
+        });
+        
+        // Prevent default video controls on mobile (Streamlit's are better)
+        document.addEventListener('touchstart', function(e) {
+            if (e.target.tagName === 'VIDEO' && e.touches.length > 1) {
+                e.preventDefault();
+            }
+        }, { passive: false });
+    });
+    </script>
+    """, unsafe_allow_html=True)
+
+# ---------- CLEANUP FUNCTION ----------
 import atexit
 
-@atexit.register
-def cleanup():
-    """Clean up temp files"""
+def cleanup_on_exit():
+    """Clean up temporary files on exit"""
     try:
-        files = [
+        files_to_remove = [
             st.session_state.get('bg_path'),
             st.session_state.get('overlay_path'),
             st.session_state.get('last_output')
         ]
-        for f in files:
-            if f and os.path.exists(f):
+        
+        for file_path in files_to_remove:
+            if file_path and os.path.exists(file_path):
                 try:
-                    os.unlink(f)
+                    os.unlink(file_path)
                 except:
                     pass
     except:
         pass
+
+atexit.register(cleanup_on_exit)
