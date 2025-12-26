@@ -12,9 +12,10 @@ from moviepy.editor import (
     AudioFileClip,
     ImageClip,
     concatenate_videoclips,
-    CompositeVideoClip
+    CompositeVideoClip,
+    ColorClip
 )
-my_title = "🎬 Mobile Video Maker V 27" #update version with any change by adding 1
+my_title = "🎬 Mobile Video Maker V 24" #update version with any change by adding 1
 # ---------- PAGE CONFIG ----------
 st.set_page_config(
     page_title= my_title,
@@ -41,7 +42,7 @@ st.markdown("""
 
 # ---------- APP TITLE ----------
 st.title(my_title)
-st.caption("Combine audio with video or image overlays - No resizing | Single slider for easy trimming")
+st.caption("Combine audio with video or image overlays - Match overlay dimensions exactly")
 
 # ---------- SESSION STATE ----------
 session_defaults = {
@@ -54,6 +55,8 @@ session_defaults = {
     'bg_is_video': False,
     'overlay_is_image': False,
     'overlay_image': None,
+    'overlay_width': 0,
+    'overlay_height': 0,
     'prev_bg_file': None,
     'prev_overlay_file': None,
     'audio_trim_values': [0.0, 30.0],  # Default: start=0, end=30
@@ -109,8 +112,8 @@ col1, col2 = st.columns(2)
 with col1:
     background_file = st.file_uploader(
         "Background Audio/Video",
-        type=["mp3", "mp4", "mov", "m4a"],
-        help="Audio will be extracted from this file"
+        type=["mp3", "mp4", "mov", "m4a", "wav", "avi", "mkv"],
+        help="Audio will be extracted from this file. Video will be converted to match overlay dimensions."
     )
     
     if background_file:
@@ -122,7 +125,7 @@ with col1:
         with st.spinner("Loading background..."):
             st.session_state.bg_path = save_uploaded_file(background_file)
             bg_ext = os.path.splitext(background_file.name)[1].lower()
-            st.session_state.bg_is_video = bg_ext in ['.mp4', '.mov']
+            st.session_state.bg_is_video = bg_ext in ['.mp4', '.mov', '.avi', '.mkv']
             
             try:
                 if st.session_state.bg_is_video:
@@ -151,8 +154,8 @@ with col1:
 with col2:
     overlay_file = st.file_uploader(
         "Overlay (Video or Image)",
-        type=["mp4", "mov", "jpg", "jpeg", "png", "gif"],
-        help="Video overlay or static image (will not be resized)"
+        type=["mp4", "mov", "avi", "mkv", "jpg", "jpeg", "png", "gif", "bmp", "webp"],
+        help="Video overlay or static image. Final video will match these dimensions exactly."
     )
     
     if overlay_file:
@@ -165,19 +168,23 @@ with col2:
         with st.spinner("Loading overlay..."):
             st.session_state.overlay_path = save_uploaded_file(overlay_file)
             file_ext = os.path.splitext(overlay_file.name)[1].lower()
-            st.session_state.overlay_is_image = file_ext in ['.jpg', '.jpeg', '.png', '.gif']
+            st.session_state.overlay_is_image = file_ext in ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp']
             
             try:
                 if st.session_state.overlay_is_image:
                     # Load image
                     st.session_state.overlay_image = Image.open(st.session_state.overlay_path)
                     st.session_state.overlay_duration = 0  # Images don't have duration
-                    st.success(f"✅ Image: {overlay_file.name}")
+                    
+                    # Get image dimensions
+                    st.session_state.overlay_width, st.session_state.overlay_height = st.session_state.overlay_image.size
+                    
+                    st.success(f"✅ Image: {overlay_file.name} ({st.session_state.overlay_width}×{st.session_state.overlay_height})")
                     
                     # Show preview
                     img_preview = st.session_state.overlay_image.copy()
                     img_preview.thumbnail((300, 300))
-                    st.image(img_preview, caption="Image preview", use_column_width=True)
+                    st.image(img_preview, caption=f"Image preview: {st.session_state.overlay_width}×{st.session_state.overlay_height}", use_column_width=True)
                     
                     # Set default image duration
                     if st.session_state.bg_duration > 0:
@@ -187,15 +194,20 @@ with col2:
                     # Load video
                     st.session_state.overlay_clip = VideoFileClip(st.session_state.overlay_path, audio=False)
                     st.session_state.overlay_duration = st.session_state.overlay_clip.duration
+                    
+                    # Get video dimensions
+                    st.session_state.overlay_width, st.session_state.overlay_height = st.session_state.overlay_clip.size
+                    
                     # Reset trim values to full duration (max 30 seconds or actual duration)
                     max_end = min(30.0, st.session_state.overlay_duration)
                     st.session_state.overlay_trim_values = [0.0, max_end]
-                    st.success(f"✅ Video: {overlay_file.name} ({st.session_state.overlay_duration:.1f}s)")
+                    
+                    st.success(f"✅ Video: {overlay_file.name} ({st.session_state.overlay_width}×{st.session_state.overlay_height}, {st.session_state.overlay_duration:.1f}s)")
                     
                     # Show preview
                     preview_img = show_single_frame_preview(st.session_state.overlay_path)
                     if preview_img:
-                        st.image(preview_img, caption="Video preview", use_column_width=True)
+                        st.image(preview_img, caption=f"Video preview: {st.session_state.overlay_width}×{st.session_state.overlay_height}", use_column_width=True)
                         
             except Exception as e:
                 st.error(f"Error: {str(e)}")
@@ -246,6 +258,10 @@ if st.session_state.bg_duration > 0:
 if st.session_state.overlay_duration > 0 and not st.session_state.overlay_is_image:
     # Single range slider for video overlay trim
     st.subheader("Video Overlay Settings")
+    
+    # Show overlay dimensions
+    st.info(f"📏 Overlay dimensions: {st.session_state.overlay_width} × {st.session_state.overlay_height}")
+    
     st.caption("Drag the handles to select start and end time for video")
     
     # Get max duration for slider
@@ -286,6 +302,9 @@ if st.session_state.overlay_duration > 0 and not st.session_state.overlay_is_ima
 elif st.session_state.overlay_is_image and st.session_state.bg_duration > 0:
     st.subheader("Image Overlay Settings")
     
+    # Show image dimensions
+    st.info(f"📏 Image dimensions: {st.session_state.overlay_width} × {st.session_state.overlay_height}")
+    
     # For images, only show duration setting
     st.markdown("**Image Display Duration**")
     st.caption("How long the image should appear in the video")
@@ -308,11 +327,29 @@ elif st.session_state.overlay_is_image and st.session_state.bg_duration > 0:
     
     st.session_state.image_duration = image_duration
     
-    st.info(f"Image will be displayed for {format_time(image_duration)} alongside the audio.")
+    st.info(f"Image will be displayed for {format_time(image_duration)} on a {st.session_state.overlay_width}×{st.session_state.overlay_height} canvas.")
 
-# ---------- PROCESS FUNCTION (WITH IMAGE SUPPORT) ----------
-def process_video_with_image():
-    """Combine audio with video or image overlay without any resizing"""
+# ---------- VIDEO BACKGROUND SETTINGS ----------
+if st.session_state.bg_is_video and st.session_state.overlay_width > 0 and st.session_state.overlay_height > 0:
+    st.subheader("Background Video Settings")
+    
+    st.warning(f"⚠️ Background video will be resized to match overlay dimensions: {st.session_state.overlay_width}×{st.session_state.overlay_height}")
+    
+    # Option to show background video or not
+    show_bg_video = st.checkbox(
+        "Include background video (resized to overlay dimensions)", 
+        value=False,
+        help="If checked, the background video will be resized and placed behind the overlay. If unchecked, only audio will be used."
+    )
+    
+    st.session_state.show_bg_video = show_bg_video
+    
+    if show_bg_video:
+        st.info("Background video will be resized to match overlay dimensions and placed behind the overlay content.")
+
+# ---------- PROCESS FUNCTION (MATCH OVERLAY DIMENSIONS) ----------
+def process_video_match_overlay():
+    """Create video matching overlay dimensions exactly, just adding background audio"""
     try:
         # Get audio trim values
         audio_start, audio_end = st.session_state.get('audio_trim_values', [0.0, 30.0])
@@ -320,15 +357,22 @@ def process_video_with_image():
         # Extract audio
         with st.spinner("Extracting audio..."):
             if st.session_state.bg_is_video:
-                audio_clip = st.session_state.bg_clip.audio.subclip(audio_start, audio_end)
+                # Extract both video and audio if needed
+                bg_video_clip = VideoFileClip(st.session_state.bg_path).subclip(audio_start, audio_end)
+                audio_clip = bg_video_clip.audio
             else:
                 # Load audio file fresh
                 audio_clip = AudioFileClip(st.session_state.bg_path).subclip(audio_start, audio_end)
+                bg_video_clip = None
         
         final_audio_duration = audio_clip.duration
         
-        # Process overlay (Video or Image)
-        with st.spinner("Processing overlay..."):
+        # Get overlay dimensions
+        overlay_width = st.session_state.overlay_width
+        overlay_height = st.session_state.overlay_height
+        overlay_size = (overlay_width, overlay_height)
+        
+        with st.spinner("Creating video with matching dimensions..."):
             if st.session_state.overlay_is_image:
                 # ----- PROCESS IMAGE OVERLAY -----
                 # Create video clip from image
@@ -341,20 +385,38 @@ def process_video_with_image():
                 if image_duration > final_audio_duration:
                     image_duration = final_audio_duration
                 
-                # Create image clip
-                overlay = ImageClip(img_array, duration=image_duration)
+                # Create image clip with overlay dimensions
+                image_clip = ImageClip(img_array, duration=image_duration)
                 
-                # If image is shorter than audio, create black background for remaining time
-                if image_duration < final_audio_duration:
-                    # Create black background for the full duration
-                    from moviepy.video.VideoClip import ColorClip
-                    bg_clip = ColorClip(size=overlay.size, color=(0, 0, 0), duration=final_audio_duration)
-                    
-                    # Composite image on top of black background
-                    overlay = overlay.set_position(('center', 'center'))
-                    final_video = CompositeVideoClip([bg_clip, overlay], duration=final_audio_duration)
+                # Resize image to match overlay dimensions (maintain aspect ratio)
+                img_aspect = st.session_state.overlay_image.width / st.session_state.overlay_image.height
+                target_aspect = overlay_width / overlay_height
+                
+                if abs(img_aspect - target_aspect) > 0.01:
+                    # Different aspect ratio - resize to fit
+                    st.warning(f"⚠️ Image aspect ratio differs from target. Resizing to fit {overlay_width}×{overlay_height}")
+                    image_clip = image_clip.resize(newsize=overlay_size)
+                
+                # Create layers list
+                layers = []
+                
+                # Add background video if available and selected
+                if st.session_state.bg_is_video and getattr(st.session_state, 'show_bg_video', False) and bg_video_clip:
+                    # Resize background video to match overlay dimensions
+                    bg_video_resized = bg_video_clip.resize(newsize=overlay_size)
+                    bg_video_resized = bg_video_resized.set_duration(final_audio_duration)
+                    layers.append(bg_video_resized)
                 else:
-                    final_video = overlay
+                    # Create black background
+                    bg_clip = ColorClip(size=overlay_size, color=(0, 0, 0), duration=final_audio_duration)
+                    layers.append(bg_clip)
+                
+                # Add image clip
+                image_clip = image_clip.set_position(('center', 'center'))
+                layers.append(image_clip)
+                
+                # Create composite video
+                final_video = CompositeVideoClip(layers, duration=final_audio_duration)
                 
             else:
                 # ----- PROCESS VIDEO OVERLAY -----
@@ -373,8 +435,21 @@ def process_video_with_image():
                 elif overlay.duration > final_audio_duration:
                     overlay = overlay.subclip(0, final_audio_duration)
                 
-                # NO RESIZING - keep original dimensions
-                final_video = overlay
+                # Create layers list
+                layers = []
+                
+                # Add background video if available and selected
+                if st.session_state.bg_is_video and getattr(st.session_state, 'show_bg_video', False) and bg_video_clip:
+                    # Resize background video to match overlay dimensions
+                    bg_video_resized = bg_video_clip.resize(newsize=overlay_size)
+                    bg_video_resized = bg_video_resized.set_duration(final_audio_duration)
+                    layers.append(bg_video_resized)
+                    # Add overlay on top
+                    layers.append(overlay)
+                    final_video = CompositeVideoClip(layers, duration=final_audio_duration)
+                else:
+                    # Just use overlay video as is (it already has the correct dimensions)
+                    final_video = overlay
             
             # Add audio to final video
             final_video = final_video.set_audio(audio_clip)
@@ -384,33 +459,43 @@ def process_video_with_image():
         with st.spinner("Saving video..."):
             output_path = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4").name
             
-            # Get original dimensions
-            width, height = final_video.size
+            # Get final dimensions (should match overlay dimensions)
+            final_width, final_height = final_video.size
             
             # Set appropriate fps
             fps = 30
             if not st.session_state.overlay_is_image:
                 fps = overlay.fps if hasattr(overlay, 'fps') else 30
             
-            final_video.write_videofile(
-                output_path,
-                fps=fps,
-                codec="libx264",
-                audio_codec="aac",
-                bitrate="8M",
-                verbose=False,
-                logger=None,
-                preset='medium',
-                ffmpeg_params=['-movflags', '+faststart']
-            )
+            # Video write parameters
+            write_params = {
+                'fps': fps,
+                'codec': 'libx264',
+                'audio_codec': 'aac',
+                'bitrate': '8M',
+                'verbose': False,
+                'logger': None,
+                'preset': 'medium',
+                'ffmpeg_params': ['-movflags', '+faststart']
+            }
+            
+            # Add threads parameter for faster encoding if available
+            try:
+                write_params['threads'] = 4
+            except:
+                pass
+            
+            final_video.write_videofile(output_path, **write_params)
         
         # Cleanup
         audio_clip.close()
+        if bg_video_clip:
+            bg_video_clip.close()
         if hasattr(overlay, 'close'):
             overlay.close()
         final_video.close()
         
-        return output_path, final_audio_duration, width, height
+        return output_path, final_audio_duration, final_width, final_height
         
     except Exception as e:
         st.error(f"Processing error: {str(e)}")
@@ -435,7 +520,7 @@ if st.button("🎬 Create Final Video",
         st.stop()
     
     # Process video
-    output_path, duration, width, height = process_video_with_image()
+    output_path, duration, width, height = process_video_match_overlay()
     
     if output_path and os.path.exists(output_path):
         st.success("✅ Video created successfully!")
@@ -461,8 +546,11 @@ if st.button("🎬 Create Final Video",
         with col3:
             st.metric("Size", f"{file_size:.1f}MB")
         
-        # Display overlay type
-        st.info(f"Overlay type: {overlay_type}")
+        # Display overlay type and dimensions info
+        if width == st.session_state.overlay_width and height == st.session_state.overlay_height:
+            st.success(f"✅ Output matches overlay dimensions exactly: {width}×{height}")
+        else:
+            st.warning(f"⚠️ Output dimensions: {width}×{height} (Overlay was: {st.session_state.overlay_width}×{st.session_state.overlay_height})")
         
         # Download button
         with open(output_path, "rb") as f:
@@ -470,7 +558,7 @@ if st.button("🎬 Create Final Video",
             st.download_button(
                 f"📥 Download {overlay_type} Video",
                 f,
-                file_name=f"combined_{file_label}_overlay_{width}x{height}.mp4",
+                file_name=f"combined_{overlay_width}x{overlay_height}.mp4",
                 mime="video/mp4",
                 type="primary",
                 use_container_width=True
@@ -500,11 +588,16 @@ with st.expander("📖 How to Use", expanded=True):
     **What this does:**
     1. Takes audio from your background file (MP3/MP4)
     2. Takes video OR image from your overlay file
-    3. Trims audio using single slider
-    4. For videos: Trims video using single slider
-    5. For images: Sets display duration
-    6. Combines them WITHOUT resizing
-    7. Outputs the video with original dimensions
+    3. Creates final video with EXACTLY the same dimensions as overlay
+    4. Adds background audio to the video/image
+    5. No unwanted resizing of overlay content
+    
+    **Key Features:**
+    - **Match Overlay Dimensions:** Final video will have exactly the same dimensions as your overlay
+    - **Video Overlay:** Can be trimmed with range slider
+    - **Image Overlay:** Static image displayed for selected duration
+    - **Background Video:** Optional background video (resized to match overlay)
+    - **Clean Output:** No unexpected resizing or aspect ratio changes
     
     **Steps:**
     1. **Upload Background** - Any audio or video file with audio
@@ -512,20 +605,21 @@ with st.expander("📖 How to Use", expanded=True):
     3. **Trim Audio** - Use the single slider to select start AND end time
     4. **If Video Overlay:** Trim video with the single slider
     5. **If Image Overlay:** Set how long to display the image
-    6. **Click Create** - Get your combined video
+    6. **Optional:** If background is video, choose to include it (resized)
+    7. **Click Create** - Get your video with matching dimensions
     
-    **Features:**
-    - **Video Overlay:** Can be trimmed with range slider
-    - **Image Overlay:** Static image displayed for selected duration
-    - **No Resizing:** Original dimensions preserved
-    - **Mobile Friendly:** Single sliders for easy trimming
+    **Dimension Matching:**
+    - Overlay video: Final video matches overlay dimensions exactly
+    - Overlay image: Final video created at image dimensions
+    - Background video: Optionally resized to match overlay dimensions
+    - Aspect ratios are preserved as much as possible
     
     **Note:** 
-    - Videos keep their original size - no resizing or black borders
-    - Images are centered on black background
-    - Image duration cannot exceed selected audio duration
+    - Overlay content is never resized unless it has different aspect ratio
+    - Background video is only resized if you choose to include it
+    - Output filename includes the dimensions for easy identification
     """)
 
 # ---------- FOOTER ----------
 st.divider()
-st.caption("Video/Image Combiner • No resizing • Single slider trimming • Keep original dimensions")
+st.caption("Video/Image Combiner • Match overlay dimensions exactly • Preserve aspect ratios • Clean output")
