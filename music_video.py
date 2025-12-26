@@ -1,10 +1,3 @@
-"""
-Video Maker V 3.0 - Enhanced Video Editor
-This application allows users to combine audio from one file with video from another,
-with independent trimming controls for both media types.
-Features: Separate start/end sliders, dynamic title, no resizing.
-"""
-
 import streamlit as st
 import tempfile
 import os
@@ -19,16 +12,15 @@ from moviepy.editor import (
     ImageClip,
     concatenate_videoclips
 )
-
+my_title = "🎬 Video Maker V 2:1"
 # ---------- PAGE CONFIG ----------
-# Configure the page layout and settings
 st.set_page_config(
-    page_title="Video Maker V 3.0",
+    page_title= my_title,
     layout="centered",
     initial_sidebar_state="collapsed"
 )
 
-# Hide the sidebar and style buttons for mobile
+# Hide the sidebar
 st.markdown("""
 <style>
     [data-testid="stSidebar"] {
@@ -38,439 +30,242 @@ st.markdown("""
     .stButton > button {
         width: 100%;
     }
-    /* Style for the dynamic title */
-    .dynamic-title {
-        background: linear-gradient(45deg, #667eea 0%, #764ba2 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        font-size: 2.5rem;
-    }
 </style>
 """, unsafe_allow_html=True)
 
-# ---------- DYNAMIC TITLE FUNCTION ----------
-def generate_dynamic_title():
-    """
-    Generate a dynamic title based on current session state variables.
-    This title updates automatically when trim values change.
-    """
-    # Base title components
-    title_parts = ["🎬 Video Maker V 3.0"]
-    
-    # Add audio duration info if available
-    if st.session_state.get('bg_duration', 0) > 0:
-        audio_start = st.session_state.get('audio_start', 0)
-        audio_end = st.session_state.get('audio_end', 0)
-        audio_duration = audio_end - audio_start
-        
-        if audio_duration > 0:
-            title_parts.append(f"🎵 {audio_duration:.1f}s")
-    
-    # Add video duration info if available
-    if st.session_state.get('overlay_duration', 0) > 0:
-        overlay_start = st.session_state.get('overlay_start', 0)
-        overlay_end = st.session_state.get('overlay_end', 0)
-        overlay_duration = overlay_end - overlay_start
-        
-        if overlay_duration > 0:
-            title_parts.append(f"📹 {overlay_duration:.1f}s")
-    
-    # Combine all parts
-    full_title = " • ".join(title_parts)
-    return full_title
+# ---------- APP TITLE ----------
+st.title(my_title)
+st.caption("Trim audio and overlay videos - No resizing")
 
-# ---------- SESSION STATE INITIALIZATION ----------
-# Define default values for session state variables
+# ---------- SESSION STATE ----------
 session_defaults = {
-    # Background media variables
-    'bg_clip': None,                    # MoviePy clip object for background
-    'overlay_clip': None,               # MoviePy clip object for overlay
-    'bg_duration': 0,                   # Total duration of background media (seconds)
-    'overlay_duration': 0,              # Total duration of overlay media (seconds)
-    'bg_path': None,                    # Temporary file path for background
-    'overlay_path': None,               # Temporary file path for overlay
-    'bg_is_video': False,               # Boolean: is background a video file?
-    'overlay_is_image': False,          # Boolean: is overlay an image file? (not used)
-    'prev_bg_file': None,               # Previous background filename for change detection
-    'prev_overlay_file': None,          # Previous overlay filename for change detection
-    
-    # Trim variables for audio/background
-    'audio_start': 0.0,                 # Start time for audio trim (seconds)
-    'audio_end': 0.0,                   # End time for audio trim (seconds)
-    
-    # Trim variables for overlay video
-    'overlay_start': 0.0,               # Start time for video trim (seconds)
-    'overlay_end': 0.0,                 # End time for video trim (seconds)
-    
-    # UI state variables
-    'last_title': "",                   # Store last generated title for change detection
-    'title_changed': False              # Flag to indicate title needs updating
+    'bg_clip': None,
+    'overlay_clip': None,
+    'bg_duration': 0,
+    'overlay_duration': 0,
+    'bg_path': None,
+    'overlay_path': None,
+    'bg_is_video': False,
+    'overlay_is_image': False,
+    'prev_bg_file': None,
+    'prev_overlay_file': None
 }
 
-# Initialize session state with default values
 for key, value in session_defaults.items():
     if key not in st.session_state:
         st.session_state[key] = value
 
-# ---------- FILE MANAGEMENT FUNCTIONS ----------
+# ---------- SIMPLIFIED HELPER FUNCTIONS ----------
 def save_uploaded_file(uploaded_file):
-    """
-    Save uploaded file to a temporary location.
-    
-    Args:
-        uploaded_file: Streamlit UploadedFile object
-        
-    Returns:
-        str: Path to the temporary file
-    """
-    # Get file extension for proper naming
-    file_extension = os.path.splitext(uploaded_file.name)[1]
-    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=file_extension)
+    """Save uploaded file to temp location"""
+    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(uploaded_file.name)[1])
     temp_file.write(uploaded_file.getvalue())
     temp_file.close()
     return temp_file.name
 
 def show_single_frame_preview(video_path, time_point=1):
-    """
-    Extract and display a single frame from a video file as a preview.
-    
-    Args:
-        video_path: Path to the video file
-        time_point: Time in seconds to extract frame from
-        
-    Returns:
-        PIL.Image: Thumbnail image or None if extraction fails
-    """
+    """Show a single frame from video"""
     try:
-        # Load video without audio for faster processing
         clip = VideoFileClip(video_path, audio=False)
-        
-        # Ensure time_point is within video duration
         if time_point > clip.duration:
             time_point = clip.duration / 2
         
-        # Extract frame and convert to PIL Image
         frame = clip.get_frame(time_point)
         img = Image.fromarray(frame)
-        
-        # Create thumbnail for display
         img.thumbnail((300, 300))
         
-        # Clean up resources
         clip.close()
         return img
-    except Exception as e:
-        st.warning(f"Could not generate preview: {str(e)}")
+    except:
         return None
 
-# ---------- APP TITLE ----------
-# Display dynamic title that updates based on current settings
-current_title = generate_dynamic_title()
-st.markdown(f"<h1 class='dynamic-title'>{current_title}</h1>", unsafe_allow_html=True)
-st.session_state.last_title = current_title  # Store for change detection
+# ---------- UPLOAD SECTIONS ----------
+st.subheader("Upload Files")
 
-st.caption("Trim audio and overlay videos - No resizing - Separate Start/End Controls")
-
-# ---------- FILE UPLOAD SECTION ----------
-st.subheader("📁 Upload Files")
-
-# Create two columns for parallel file uploads
 col1, col2 = st.columns(2)
 
 with col1:
-    # Background file uploader (audio or video)
     background_file = st.file_uploader(
         "Background Audio/Video",
         type=["mp3", "mp4", "mov", "m4a"],
-        help="Audio will be extracted from this file. Supports MP3, MP4, MOV, M4A formats."
+        help="Audio will be extracted from this file"
     )
     
     if background_file:
-        # Detect if file has changed since last upload
         if st.session_state.prev_bg_file != background_file.name:
-            st.session_state.bg_clip = None  # Clear old clip
-            st.session_state.prev_bg_file = background_file.name  # Update filename
+            st.session_state.bg_clip = None
+            st.session_state.prev_bg_file = background_file.name
         
-        # Process and load the background file
-        with st.spinner("Loading background media..."):
-            # Save to temporary file
+        # Save and load
+        with st.spinner("Loading background..."):
             st.session_state.bg_path = save_uploaded_file(background_file)
-            
-            # Determine file type by extension
             bg_ext = os.path.splitext(background_file.name)[1].lower()
             st.session_state.bg_is_video = bg_ext in ['.mp4', '.mov']
             
             try:
                 if st.session_state.bg_is_video:
-                    # Load as video file and extract audio
                     st.session_state.bg_clip = VideoFileClip(st.session_state.bg_path)
                     audio = st.session_state.bg_clip.audio
                     if audio:
                         st.session_state.bg_duration = audio.duration
-                        # Initialize trim points to full duration
-                        st.session_state.audio_end = st.session_state.bg_duration
-                        st.success(f"✅ Video loaded: {background_file.name} ({st.session_state.bg_duration:.1f}s)")
+                        st.success(f"✅ Video: {background_file.name} ({st.session_state.bg_duration:.1f}s)")
                     else:
-                        st.error("No audio track found in video file")
+                        st.error("No audio in video")
                         st.stop()
                 else:
-                    # Load as audio-only file
                     audio = AudioFileClip(st.session_state.bg_path)
                     st.session_state.bg_duration = audio.duration
-                    # Initialize trim points to full duration
-                    st.session_state.audio_end = st.session_state.bg_duration
-                    st.success(f"✅ Audio loaded: {background_file.name} ({st.session_state.bg_duration:.1f}s)")
+                    st.success(f"✅ Audio: {background_file.name} ({st.session_state.bg_duration:.1f}s)")
                 
-                # Set title changed flag
-                st.session_state.title_changed = True
-                    
             except Exception as e:
-                st.error(f"Error loading background file: {str(e)}")
-                # Clean up on error
-                if os.path.exists(st.session_state.bg_path):
-                    os.unlink(st.session_state.bg_path)
+                st.error(f"Error: {str(e)}")
 
 with col2:
-    # Overlay video file uploader
     overlay_file = st.file_uploader(
         "Overlay Video",
         type=["mp4", "mov"],
-        help="Video overlay file. Will not be resized. Supports MP4, MOV formats."
+        help="Video overlay (will not be resized)"
     )
     
     if overlay_file:
-        # Detect if file has changed since last upload
         if st.session_state.prev_overlay_file != overlay_file.name:
-            st.session_state.overlay_clip = None  # Clear old clip
-            st.session_state.prev_overlay_file = overlay_file.name  # Update filename
+            st.session_state.overlay_clip = None
+            st.session_state.prev_overlay_file = overlay_file.name
         
-        # Process and load the overlay file
-        with st.spinner("Loading overlay video..."):
-            # Save to temporary file
+        # Save and load
+        with st.spinner("Loading overlay..."):
             st.session_state.overlay_path = save_uploaded_file(overlay_file)
+            st.session_state.overlay_is_image = False
             
             try:
-                # Load video file without audio
                 st.session_state.overlay_clip = VideoFileClip(st.session_state.overlay_path, audio=False)
                 st.session_state.overlay_duration = st.session_state.overlay_clip.duration
-                # Initialize trim points to full duration
-                st.session_state.overlay_end = st.session_state.overlay_duration
-                st.success(f"✅ Overlay loaded: {overlay_file.name} ({st.session_state.overlay_duration:.1f}s)")
+                st.success(f"✅ Overlay: {overlay_file.name} ({st.session_state.overlay_duration:.1f}s)")
                 
-                # Display preview thumbnail
+                # Show preview
                 preview_img = show_single_frame_preview(st.session_state.overlay_path)
                 if preview_img:
                     st.image(preview_img, caption="Overlay preview", use_column_width=True)
-                
-                # Set title changed flag
-                st.session_state.title_changed = True
                     
             except Exception as e:
-                st.error(f"Error loading overlay file: {str(e)}")
-                # Clean up on error
-                if os.path.exists(st.session_state.overlay_path):
-                    os.unlink(st.session_state.overlay_path)
+                st.error(f"Error: {str(e)}")
 
-# ---------- AUDIO TRIM CONTROLS ----------
+# ---------- SIMPLE TRIM SLIDERS ----------
 if st.session_state.bg_duration > 0:
-    st.subheader("🎵 Audio Trim Settings")
+    st.subheader("Trim Settings")
     
-    # Create two columns for start/end sliders
-    col1, col2 = st.columns(2)
+    # Single slider for audio trim
+    st.markdown("**Audio Duration**")
+    audio_start = st.slider(
+        "Audio Start (seconds)",
+        0.0,
+        float(st.session_state.bg_duration),
+        0.0,
+        0.5,
+        key="audio_start"
+    )
     
-    with col1:
-        st.markdown("**Audio Start**")
-        # Start time slider for audio
-        audio_start = st.slider(
-            "Start (seconds)",
-            0.0,  # Minimum value
-            float(st.session_state.bg_duration),  # Maximum value (full duration)
-            float(min(st.session_state.audio_start, st.session_state.bg_duration - 0.1)),  # Current value
-            0.1,  # Step size
-            key="audio_start_slider",  # Unique key for widget
-            label_visibility="collapsed",  # Hide default label
-            on_change=lambda: setattr(st.session_state, 'title_changed', True)  # Update title on change
-        )
-        st.session_state.audio_start = audio_start  # Store in session state
-        st.caption(f"Start: {audio_start:.1f}s")  # Display current value
+    # Calculate audio end based on start + duration
+    max_audio_duration = st.session_state.bg_duration - audio_start
+    audio_duration = st.slider(
+        "Audio Duration (seconds)",
+        1.0,
+        float(max_audio_duration),
+        min(30.0, float(max_audio_duration)),
+        0.5,
+        key="audio_duration"
+    )
     
-    with col2:
-        st.markdown("**Audio End**")
-        # Calculate minimum end value (start + 0.1 seconds)
-        min_end = min(audio_start + 0.1, st.session_state.bg_duration)
-        
-        # End time slider for audio
-        audio_end = st.slider(
-            "End (seconds)",
-            float(min_end),  # Minimum value (prevents end < start)
-            float(st.session_state.bg_duration),  # Maximum value
-            float(min(st.session_state.audio_end, st.session_state.bg_duration)),  # Current value
-            0.1,  # Step size
-            key="audio_end_slider",  # Unique key for widget
-            label_visibility="collapsed",  # Hide default label
-            on_change=lambda: setattr(st.session_state, 'title_changed', True)  # Update title on change
-        )
-        st.session_state.audio_end = audio_end  # Store in session state
-        st.caption(f"End: {audio_end:.1f}s")  # Display current value
-    
-    # Calculate and display audio selection info
-    audio_duration = audio_end - audio_start
-    if audio_duration > 0:
-        st.info(f"🎵 Audio selection: {audio_start:.1f}s to {audio_end:.1f}s ({audio_duration:.1f}s)")
-        # Update title if duration changed
-        if st.session_state.title_changed:
-            new_title = generate_dynamic_title()
-            if new_title != st.session_state.last_title:
-                st.session_state.last_title = new_title
-                st.rerun()  # Force UI refresh to update title
-    else:
-        st.error("Audio selection must be at least 0.1 seconds")
+    audio_end = audio_start + audio_duration
+    st.info(f"Audio: {audio_start:.1f}s to {audio_end:.1f}s ({audio_duration:.1f}s total)")
 
-# ---------- VIDEO TRIM CONTROLS ----------
 if st.session_state.overlay_duration > 0:
-    st.subheader("🎬 Overlay Video Trim Settings")
+    # Single slider for overlay trim
+    st.markdown("**Overlay Video Trim**")
+    overlay_start = st.slider(
+        "Overlay Start (seconds)",
+        0.0,
+        float(st.session_state.overlay_duration),
+        0.0,
+        0.5,
+        key="overlay_start"
+    )
     
-    # Create two columns for start/end sliders
-    col1, col2 = st.columns(2)
+    max_overlay_duration = st.session_state.overlay_duration - overlay_start
+    overlay_duration = st.slider(
+        "Overlay Duration (seconds)",
+        1.0,
+        float(max_overlay_duration),
+        min(30.0, float(max_overlay_duration)),
+        0.5,
+        key="overlay_duration"
+    )
     
-    with col1:
-        st.markdown("**Video Start**")
-        # Start time slider for video
-        overlay_start = st.slider(
-            "Start (seconds)",
-            0.0,  # Minimum value
-            float(st.session_state.overlay_duration),  # Maximum value
-            float(min(st.session_state.overlay_start, st.session_state.overlay_duration - 0.1)),  # Current value
-            0.1,  # Step size
-            key="overlay_start_slider",  # Unique key for widget
-            label_visibility="collapsed",  # Hide default label
-            on_change=lambda: setattr(st.session_state, 'title_changed', True)  # Update title on change
-        )
-        st.session_state.overlay_start = overlay_start  # Store in session state
-        st.caption(f"Start: {overlay_start:.1f}s")  # Display current value
-    
-    with col2:
-        st.markdown("**Video End**")
-        # Calculate minimum end value (start + 0.1 seconds)
-        min_end = min(overlay_start + 0.1, st.session_state.overlay_duration)
-        
-        # End time slider for video
-        overlay_end = st.slider(
-            "End (seconds)",
-            float(min_end),  # Minimum value (prevents end < start)
-            float(st.session_state.overlay_duration),  # Maximum value
-            float(min(st.session_state.overlay_end, st.session_state.overlay_duration)),  # Current value
-            0.1,  # Step size
-            key="overlay_end_slider",  # Unique key for widget
-            label_visibility="collapsed",  # Hide default label
-            on_change=lambda: setattr(st.session_state, 'title_changed', True)  # Update title on change
-        )
-        st.session_state.overlay_end = overlay_end  # Store in session state
-        st.caption(f"End: {overlay_end:.1f}s")  # Display current value
-    
-    # Calculate and display video selection info
-    overlay_duration = overlay_end - overlay_start
-    if overlay_duration > 0:
-        st.info(f"🎬 Video selection: {overlay_start:.1f}s to {overlay_end:.1f}s ({overlay_duration:.1f}s)")
-        # Update title if duration changed
-        if st.session_state.title_changed:
-            new_title = generate_dynamic_title()
-            if new_title != st.session_state.last_title:
-                st.session_state.last_title = new_title
-                st.rerun()  # Force UI refresh to update title
-    else:
-        st.error("Video selection must be at least 0.1 seconds")
+    overlay_end = overlay_start + overlay_duration
+    st.info(f"Overlay: {overlay_start:.1f}s to {overlay_end:.1f}s ({overlay_duration:.1f}s total)")
 
-# Reset title changed flag after updates
-if st.session_state.title_changed:
-    st.session_state.title_changed = False
-
-# ---------- VIDEO PROCESSING FUNCTION ----------
+# ---------- PROCESS FUNCTION (NO RESIZING) ----------
 def process_video_no_resize():
-    """
-    Combine trimmed audio with trimmed video without resizing.
-    
-    Steps:
-    1. Extract audio segment based on start/end times
-    2. Extract video segment based on start/end times
-    3. Loop video if shorter than audio
-    4. Combine audio and video
-    5. Save to temporary file
-    
-    Returns:
-        tuple: (output_path, duration, width, height) or (None, 0, 0, 0) on error
-    """
+    """Combine audio and video without any resizing"""
     try:
-        # Get trim values from session state
+        # Get trim values
         audio_start = st.session_state.get('audio_start', 0)
-        audio_end = st.session_state.get('audio_end', 0)
+        audio_duration_val = st.session_state.get('audio_duration', 30)
+        audio_end = audio_start + audio_duration_val
         
         overlay_start = st.session_state.get('overlay_start', 0)
-        overlay_end = st.session_state.get('overlay_end', 0)
+        overlay_duration_val = st.session_state.get('overlay_duration', 30)
+        overlay_end = overlay_start + overlay_duration_val
         
-        # Validate durations
-        if audio_end <= audio_start:
-            st.error("Audio end must be greater than audio start")
-            return None, 0, 0, 0
-        
-        if overlay_end <= overlay_start:
-            st.error("Overlay end must be greater than overlay start")
-            return None, 0, 0, 0
-        
-        # Calculate final audio duration
-        final_audio_duration = audio_end - audio_start
-        
-        # Step 1: Extract audio segment
-        with st.spinner("Extracting audio segment..."):
+        # Extract audio
+        with st.spinner("Extracting audio..."):
             if st.session_state.bg_is_video:
-                # Extract audio from video file
                 audio_clip = st.session_state.bg_clip.audio.subclip(audio_start, audio_end)
             else:
-                # Load audio from audio-only file
+                # Load audio file fresh
                 audio_clip = AudioFileClip(st.session_state.bg_path).subclip(audio_start, audio_end)
         
-        # Step 2: Process video segment
-        with st.spinner("Processing video segment..."):
-            # Extract video segment
+        final_audio_duration = audio_clip.duration
+        
+        # Process overlay video (NO RESIZING)
+        with st.spinner("Processing overlay..."):
+            # Trim overlay
             overlay = st.session_state.overlay_clip.subclip(overlay_start, overlay_end)
             
-            # Step 3: Match durations
-            # If video is shorter than audio, loop it
+            # Match durations - loop overlay if shorter than audio
             if overlay.duration < final_audio_duration:
                 loops_needed = int(final_audio_duration / overlay.duration) + 1
                 overlay_loops = [overlay] * loops_needed
                 overlay = concatenate_videoclips(overlay_loops)
                 overlay = overlay.subclip(0, final_audio_duration)
-            # If video is longer than audio, trim it
             elif overlay.duration > final_audio_duration:
                 overlay = overlay.subclip(0, final_audio_duration)
             
-            # Step 4: Combine audio and video (NO RESIZING - keep original dimensions)
+            # NO RESIZING - keep original dimensions
+            # Just add the audio
             final_video = overlay.set_audio(audio_clip)
             final_video = final_video.set_duration(final_audio_duration)
         
-        # Step 5: Save video
-        with st.spinner("Encoding final video..."):
-            # Create temporary output file
+        # Save video
+        with st.spinner("Saving video..."):
             output_path = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4").name
             
-            # Get original video dimensions
+            # Get original dimensions
             width, height = overlay.size
             
-            # Write video with high-quality settings
             final_video.write_videofile(
                 output_path,
-                fps=overlay.fps if hasattr(overlay, 'fps') else 30,  # Use original FPS
-                codec="libx264",  # Standard video codec
-                audio_codec="aac",  # Standard audio codec
-                bitrate="8M",  # Good quality bitrate
-                verbose=False,  # Suppress verbose output
-                logger=None,  # Suppress logger
-                preset='medium',  # Encoding speed/quality balance
-                ffmpeg_params=['-movflags', '+faststart']  # Web optimization
+                fps=overlay.fps if hasattr(overlay, 'fps') else 30,
+                codec="libx264",
+                audio_codec="aac",
+                bitrate="8M",
+                verbose=False,
+                logger=None,
+                preset='medium',
+                ffmpeg_params=['-movflags', '+faststart']
             )
         
-        # Step 6: Clean up resources
+        # Cleanup
         audio_clip.close()
         overlay.close()
         final_video.close()
@@ -479,58 +274,42 @@ def process_video_no_resize():
         
     except Exception as e:
         st.error(f"Processing error: {str(e)}")
-        # Provide detailed error info in expandable section
         import traceback
-        with st.expander("🔍 Error details"):
+        with st.expander("Error details"):
             st.code(traceback.format_exc())
         return None, 0, 0, 0
 
-# ---------- CREATE VIDEO BUTTON ----------
+# ---------- CREATE BUTTON ----------
 st.divider()
 
 # Check if both files are uploaded
 files_ready = st.session_state.bg_path and st.session_state.overlay_path
 
-# Validate slider values before enabling create button
-sliders_valid = True
-if files_ready:
-    if st.session_state.audio_end <= st.session_state.audio_start:
-        st.warning("⚠️ Audio end must be greater than audio start")
-        sliders_valid = False
-    if st.session_state.overlay_end <= st.session_state.overlay_start:
-        st.warning("⚠️ Overlay end must be greater than overlay start")
-        sliders_valid = False
-
-# Create video button (primary action)
 if st.button("🎬 Create Final Video", 
              type="primary", 
-             disabled=not files_ready or not sliders_valid,
+             disabled=not files_ready,
              use_container_width=True):
     
     if not files_ready:
         st.warning("Please upload both background and overlay files first")
         st.stop()
     
-    if not sliders_valid:
-        st.warning("Please fix the slider values first")
-        st.stop()
-    
     # Process video
     output_path, duration, width, height = process_video_no_resize()
     
-    # Display results if successful
     if output_path and os.path.exists(output_path):
         st.success("✅ Video created successfully!")
         
-        # Display video preview
+        # Show video
         st.subheader("Your Video")
+        
         try:
             st.video(output_path)
         except:
             st.info("Video preview (download to view)")
         
-        # Display video metadata
-        file_size = os.path.getsize(output_path) / (1024 * 1024)  # Convert to MB
+        # Show info
+        file_size = os.path.getsize(output_path) / (1024 * 1024)
         
         col1, col2, col3 = st.columns(3)
         with col1:
@@ -538,81 +317,57 @@ if st.button("🎬 Create Final Video",
         with col2:
             st.metric("Resolution", f"{width}×{height}")
         with col3:
-            st.metric("File Size", f"{file_size:.1f}MB")
+            st.metric("Size", f"{file_size:.1f}MB")
         
         # Download button
         with open(output_path, "rb") as f:
             st.download_button(
                 "📥 Download Video",
                 f,
-                file_name=f"video_{width}x{height}_{duration:.0f}s.mp4",
+                file_name=f"trimmed_video_{width}x{height}.mp4",
                 mime="video/mp4",
                 type="primary",
                 use_container_width=True
             )
         
-        # Clean up temporary input files
+        # Cleanup temp files
         try:
             if st.session_state.bg_path and os.path.exists(st.session_state.bg_path):
                 os.unlink(st.session_state.bg_path)
             if st.session_state.overlay_path and os.path.exists(st.session_state.overlay_path):
                 os.unlink(st.session_state.overlay_path)
-        except Exception as e:
-            st.warning(f"Could not clean up temporary files: {str(e)}")
+        except:
+            pass
         
-        # Clear session state for next operation
+        # Clear session
         for key in ['bg_path', 'overlay_path', 'bg_clip', 'overlay_clip']:
             if key in st.session_state:
                 st.session_state[key] = None
         
-        # Force garbage collection
         gc.collect()
 
-# ---------- INSTRUCTIONS SECTION ----------
+# ---------- INSTRUCTIONS ----------
 with st.expander("📖 How to Use", expanded=True):
     st.markdown("""
-    ### Video Maker V 3.0 - Complete Guide
+    ### Simple Video Trimmer
     
-    **✨ Key Features:**
-    1. **Separate Start/End Controls** - Independent sliders for precise trimming
-    2. **Dynamic Title** - Title updates automatically with your selections
-    3. **No Resizing** - Original video dimensions are preserved
-    4. **Audio Extraction** - Extract audio from video files or use audio files
-    5. **Auto-looping** - Short videos automatically loop to match audio length
+    **What this does:**
+    1. Takes audio from your background file (MP3/MP4)
+    2. Takes video from your overlay file (MP4/MOV)
+    3. Trims both using simple sliders
+    4. Combines them WITHOUT resizing
+    5. Outputs the video with original dimensions
     
-    **📋 Step-by-Step Instructions:**
+    **Steps:**
+    1. **Upload Background** - Any audio or video file
+    2. **Upload Overlay** - Video file (will not be resized)
+    3. **Trim Audio** - Select start point and duration
+    4. **Trim Video** - Select start point and duration
+    5. **Click Create** - Get your combined video
     
-    1. **Upload Files**
-       - **Background**: Upload any audio or video file (MP3, MP4, MOV, M4A)
-       - **Overlay**: Upload a video file (MP4, MOV) - this provides the visuals
-    
-    2. **Set Trim Points**
-       - **Audio**: Use the start and end sliders to select the exact audio segment
-       - **Video**: Use the start and end sliders to select the exact video segment
-       - **Note**: The title updates automatically showing selected durations
-    
-    3. **Create Video**
-       - Click "Create Final Video" to combine your selections
-       - The app will match video duration to audio (looping if needed)
-       - No resizing - your video keeps its original quality and dimensions
-    
-    4. **Download Result**
-       - Preview your video directly in the browser
-       - Download the final MP4 file with one click
-    
-    **⚙️ Technical Details:**
-    - **Codec**: H.264 video with AAC audio (compatible with all devices)
-    - **Quality**: 8 Mbps bitrate for good quality/size balance
-    - **Processing**: FFmpeg-based with fast encoding preset
-    - **Compatibility**: Output is web-optimized with fast-start flag
-    
-    **💡 Pro Tips:**
-    - For best results, use videos with matching aspect ratios
-    - Longer audio segments with shorter videos create seamless loops
-    - The app automatically prevents invalid start/end combinations
-    - All processing happens locally - your files are not uploaded to any server
+    **Note:** Videos keep their original size - no resizing or black borders.
     """)
 
 # ---------- FOOTER ----------
 st.divider()
-st.caption("Video Maker V 3.0 • No Resizing • Start/End Controls • Dynamic Title • Local Processing")
+st.caption("Video Trimmer • No resizing • Keep original dimensions")
