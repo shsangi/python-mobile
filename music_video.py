@@ -15,7 +15,7 @@ from moviepy.editor import (
 
 # ---------- PAGE CONFIG ----------
 st.set_page_config(
-    page_title="Video Maker V 2:2", #update on any change
+    page_title="Video Maker V 2:3", #update on any change
     layout="centered",
     initial_sidebar_state="collapsed"
 )
