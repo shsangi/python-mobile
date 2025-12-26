@@ -34,7 +34,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ---------- APP TITLE ----------
-st.title("🎬 Video Trimmer")
+st.title("🎬 Video Maker V 2:1")
 st.caption("Trim audio and overlay videos - No resizing")
 
 # ---------- SESSION STATE ----------
