@@ -6,7 +6,7 @@ import numpy as np
 from moviepy.editor import VideoFileClip, AudioFileClip, ImageClip, concatenate_videoclips, CompositeVideoClip
 from moviepy.video.VideoClip import ColorClip
 
-st.set_page_config(page_title="🎬 Mobile Video Maker", layout="centered")
+st.set_page_config(page_title="🎬 Mobile Video Maker v1", layout="centered")
 st.markdown('<style>[data-testid="stSidebar"]{display:none}.stButton>button{width:100%}</style>', unsafe_allow_html=True)
 st.title("🎬 Mobile Video Maker")
 st.caption("Combine audio with video or image overlays")
