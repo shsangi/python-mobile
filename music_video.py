@@ -2,25 +2,24 @@ import streamlit as st
 import tempfile
 import os
 import gc
-from PIL import Image
-import base64
 import subprocess
+from PIL import Image
 import numpy as np
 
 import moviepy
 from moviepy.editor import (
     VideoFileClip,
     AudioFileClip,
-    ImageClip,
-    concatenate_videoclips,
-    AudioArrayClip
+    concatenate_videoclips
 )
 from moviepy.config import change_settings
 
-# Set FFMPEG path (adjust if needed)
-change_settings({"FFMPEG_BINARY": "ffmpeg"})
+# Fix FFMPEG path issues (important for Streamlit Cloud)
+import warnings
+warnings.filterwarnings("ignore")
 
-my_title = "🎬 Mobile Video Maker V 2.1"
+my_title = "🎬 Mobile Video Maker V 22"
+
 # ---------- PAGE CONFIG ----------
 st.set_page_config(
     page_title=my_title,
@@ -28,7 +27,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# Hide the sidebar
+# Hide the sidebar and improve mobile styling
 st.markdown("""
 <style>
     [data-testid="stSidebar"] {
@@ -38,25 +37,24 @@ st.markdown("""
     .stButton > button {
         width: 100%;
     }
-    /* Better video display */
+    /* Video container styling */
     .stVideo {
+        background-color: #000;
         border-radius: 10px;
-        overflow: hidden;
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-    }
-    /* Info boxes */
-    .info-box {
         padding: 10px;
-        border-radius: 5px;
-        background-color: #f0f2f6;
-        margin: 10px 0;
+    }
+    /* Fix for video display */
+    video {
+        max-width: 100% !important;
+        height: auto !important;
+        object-fit: contain !important;
     }
 </style>
 """, unsafe_allow_html=True)
 
 # ---------- APP TITLE ----------
 st.title(my_title)
-st.caption("Trim audio and overlay videos - No resizing - Mobile Optimized")
+st.caption("Trim audio and overlay videos - No resizing")
 
 # ---------- SESSION STATE ----------
 session_defaults = {
@@ -70,283 +68,276 @@ session_defaults = {
     'overlay_is_image': False,
     'prev_bg_file': None,
     'prev_overlay_file': None,
-    'overlay_info': None
+    'bg_loaded': False,
+    'overlay_loaded': False
 }
 
 for key, value in session_defaults.items():
     if key not in st.session_state:
         st.session_state[key] = value
 
-# ---------- ENHANCED HELPER FUNCTIONS ----------
+# ---------- IMPROVED HELPER FUNCTIONS ----------
 def save_uploaded_file(uploaded_file):
-    """Save uploaded file to temp location"""
-    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(uploaded_file.name)[1])
+    """Save uploaded file to temp location with proper extension"""
+    ext = os.path.splitext(uploaded_file.name)[1]
+    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=ext)
     temp_file.write(uploaded_file.getvalue())
     temp_file.close()
     return temp_file.name
 
+def get_video_info(video_path):
+    """Get video information using ffprobe"""
+    try:
+        cmd = [
+            'ffprobe', '-v', 'error',
+            '-select_streams', 'v:0',
+            '-show_entries', 'stream=width,height,r_frame_rate,codec_name,duration',
+            '-of', 'json',
+            video_path
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode == 0:
+            import json
+            info = json.loads(result.stdout)
+            return info
+    except:
+        return None
+    return None
+
+def validate_video_file(file_path):
+    """Check if video file is valid"""
+    try:
+        clip = VideoFileClip(file_path, audio=False)
+        duration = clip.duration
+        width, height = clip.size
+        clip.close()
+        return True, duration, width, height
+    except Exception as e:
+        return False, 0, 0, 0
+
 def show_single_frame_preview(video_path, time_point=1):
-    """Show a single frame from video"""
+    """Show a single frame from video with error handling"""
     try:
         clip = VideoFileClip(video_path, audio=False)
+        if clip.duration <= 0:
+            return None
+        
         if time_point > clip.duration:
-            time_point = clip.duration / 2
+            time_point = max(0, clip.duration / 2)
         
         frame = clip.get_frame(time_point)
         img = Image.fromarray(frame)
-        img.thumbnail((300, 300))
+        
+        # Maintain aspect ratio for preview
+        max_size = (300, 300)
+        img.thumbnail(max_size, Image.Resampling.LANCZOS)
         
         clip.close()
         return img
-    except:
+    except Exception as e:
+        print(f"Preview error: {e}")
         return None
 
-def validate_video_file(file_path):
-    """Check if video file is compatible"""
-    try:
-        clip = VideoFileClip(file_path, audio=False)
-        info = {
-            'width': clip.w,
-            'height': clip.h,
-            'duration': clip.duration,
-            'fps': clip.fps,
-            'aspect_ratio': clip.w / clip.h,
-            'is_portrait': clip.h > clip.w,
-            'size': os.path.getsize(file_path) / (1024 * 1024)  # MB
-        }
-        clip.close()
-        return info
-    except Exception as e:
-        st.warning(f"⚠️ Video validation warning: {str(e)}")
-        return None
-
-def convert_to_compatible_format(input_path):
-    """Convert video to a more compatible format for mobile devices"""
-    output_path = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4").name
+def cleanup_old_files():
+    """Cleanup old temporary files"""
+    if 'bg_path' in st.session_state and st.session_state.bg_path:
+        if os.path.exists(st.session_state.bg_path):
+            try:
+                os.unlink(st.session_state.bg_path)
+            except:
+                pass
     
-    cmd = [
-        'ffmpeg', '-i', input_path,
-        '-c:v', 'libx264',
-        '-preset', 'fast',
-        '-profile:v', 'baseline',
-        '-level', '3.0',
-        '-pix_fmt', 'yuv420p',
-        '-c:a', 'aac',
-        '-b:a', '128k',
-        '-movflags', '+faststart',
-        '-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2',  # Ensure even dimensions
-        '-y', output_path
-    ]
-    
-    try:
-        with st.spinner("Converting video for mobile compatibility..."):
-            result = subprocess.run(cmd, check=True, capture_output=True, text=True)
-        st.success("✅ Video converted for mobile compatibility")
-        return output_path
-    except subprocess.CalledProcessError as e:
-        st.warning(f"⚠️ Conversion failed: {e.stderr[:200]}")
-        return input_path  # Return original if conversion fails
-    except Exception as e:
-        st.warning(f"⚠️ Conversion error: {str(e)}")
-        return input_path
-
-def display_video_with_fallback(video_path):
-    """Display video with fallback for mobile compatibility"""
-    try:
-        # Display video
-        video_bytes = open(video_path, 'rb').read()
-        st.video(video_bytes)
-        
-        # Also show video info
-        try:
-            clip = VideoFileClip(video_path, audio=False)
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("Resolution", f"{clip.w}×{clip.h}")
-            with col2:
-                st.metric("FPS", f"{clip.fps:.1f}")
-            with col3:
-                st.metric("Duration", f"{clip.duration:.1f}s")
-            clip.close()
-        except:
-            pass
-            
-    except Exception as e:
-        st.warning("📱 Preview might not display in all browsers. Download to view on mobile.")
-        
-        # Fallback: show file info
-        file_size = os.path.getsize(video_path) / (1024 * 1024)
-        st.info(f"Video file ready: {file_size:.1f}MB - Download to view")
+    if 'overlay_path' in st.session_state and st.session_state.overlay_path:
+        if os.path.exists(st.session_state.overlay_path):
+            try:
+                os.unlink(st.session_state.overlay_path)
+            except:
+                pass
 
 # ---------- UPLOAD SECTIONS ----------
-st.subheader("📤 Upload Files")
+st.subheader("Upload Files")
 
 col1, col2 = st.columns(2)
 
 with col1:
     background_file = st.file_uploader(
         "Background Audio/Video",
-        type=["mp3", "mp4", "mov", "m4a", "wav", "avi"],
-        help="Audio will be extracted from this file"
+        type=["mp3", "mp4", "mov", "m4a", "wav", "avi", "mkv"],
+        help="Audio will be extracted from this file. Supported: MP3, MP4, MOV, M4A"
     )
     
     if background_file:
-        if st.session_state.prev_bg_file != background_file.name:
-            st.session_state.bg_clip = None
-            st.session_state.prev_bg_file = background_file.name
-        
-        # Save and load
-        with st.spinner("Loading background..."):
-            st.session_state.bg_path = save_uploaded_file(background_file)
-            bg_ext = os.path.splitext(background_file.name)[1].lower()
-            st.session_state.bg_is_video = bg_ext in ['.mp4', '.mov', '.avi']
+        if st.session_state.prev_bg_file != background_file.name or not st.session_state.bg_loaded:
+            # Cleanup old files
+            if st.session_state.bg_clip:
+                try:
+                    st.session_state.bg_clip.close()
+                except:
+                    pass
             
-            try:
-                if st.session_state.bg_is_video:
-                    st.session_state.bg_clip = VideoFileClip(st.session_state.bg_path)
-                    audio = st.session_state.bg_clip.audio
-                    if audio:
-                        st.session_state.bg_duration = audio.duration
+            st.session_state.bg_loaded = False
+            st.session_state.prev_bg_file = background_file.name
+            
+            # Save and load
+            with st.spinner("Loading background..."):
+                cleanup_old_files()  # Clean old files first
+                st.session_state.bg_path = save_uploaded_file(background_file)
+                bg_ext = os.path.splitext(background_file.name)[1].lower()
+                st.session_state.bg_is_video = bg_ext in ['.mp4', '.mov', '.avi', '.mkv']
+                
+                try:
+                    if st.session_state.bg_is_video:
+                        # Load video with audio
+                        st.session_state.bg_clip = VideoFileClip(st.session_state.bg_path)
+                        if st.session_state.bg_clip.audio is not None:
+                            st.session_state.bg_duration = st.session_state.bg_clip.audio.duration
+                        else:
+                            st.session_state.bg_duration = st.session_state.bg_clip.duration
+                        
                         st.success(f"✅ Video: {background_file.name}")
                         st.info(f"Duration: {st.session_state.bg_duration:.1f}s")
+                        
+                        # Show video info
+                        width, height = st.session_state.bg_clip.size
+                        st.caption(f"Resolution: {width}×{height}")
                     else:
-                        st.error("❌ No audio in video")
-                        st.stop()
-                else:
-                    audio = AudioFileClip(st.session_state.bg_path)
-                    st.session_state.bg_duration = audio.duration
-                    st.success(f"✅ Audio: {background_file.name}")
-                    st.info(f"Duration: {st.session_state.bg_duration:.1f}s")
-                
-            except Exception as e:
-                st.error(f"❌ Error loading file: {str(e)}")
+                        # Load audio only
+                        audio_clip = AudioFileClip(st.session_state.bg_path)
+                        st.session_state.bg_duration = audio_clip.duration
+                        audio_clip.close()
+                        st.success(f"✅ Audio: {background_file.name}")
+                        st.info(f"Duration: {st.session_state.bg_duration:.1f}s")
+                    
+                    st.session_state.bg_loaded = True
+                    
+                except Exception as e:
+                    st.error(f"Error loading file: {str(e)}")
+                    st.info("Try converting to MP4 format for better compatibility")
 
 with col2:
     overlay_file = st.file_uploader(
         "Overlay Video",
         type=["mp4", "mov", "avi", "mkv", "webm"],
-        help="Video overlay (will not be resized). For best mobile compatibility, use MP4 format."
+        help="Video overlay (will not be resized). For best results, use MP4 format."
     )
     
     if overlay_file:
-        if st.session_state.prev_overlay_file != overlay_file.name:
-            st.session_state.overlay_clip = None
-            st.session_state.prev_overlay_file = overlay_file.name
-        
-        # Save and load
-        with st.spinner("Loading overlay..."):
-            st.session_state.overlay_path = save_uploaded_file(overlay_file)
-            st.session_state.overlay_is_image = False
+        if st.session_state.prev_overlay_file != overlay_file.name or not st.session_state.overlay_loaded:
+            # Cleanup old files
+            if st.session_state.overlay_clip:
+                try:
+                    st.session_state.overlay_clip.close()
+                except:
+                    pass
             
-            try:
-                # Validate video
-                overlay_info = validate_video_file(st.session_state.overlay_path)
+            st.session_state.overlay_loaded = False
+            st.session_state.prev_overlay_file = overlay_file.name
+            
+            # Save and load
+            with st.spinner("Loading overlay..."):
+                cleanup_old_files()
+                st.session_state.overlay_path = save_uploaded_file(overlay_file)
+                st.session_state.overlay_is_image = False
                 
-                if overlay_info:
-                    st.session_state.overlay_info = overlay_info
+                try:
+                    # Validate video file
+                    is_valid, duration, width, height = validate_video_file(st.session_state.overlay_path)
                     
-                    # Check for potential issues
-                    if overlay_info['width'] % 2 != 0 or overlay_info['height'] % 2 != 0:
-                        st.warning("⚠️ Odd dimensions detected. Converting for mobile compatibility...")
-                        st.session_state.overlay_path = convert_to_compatible_format(st.session_state.overlay_path)
-                        overlay_info = validate_video_file(st.session_state.overlay_path)
+                    if not is_valid:
+                        st.error("Invalid video file. Please upload a valid MP4 file.")
+                        st.stop()
                     
-                    # Load the clip
-                    st.session_state.overlay_clip = VideoFileClip(
-                        st.session_state.overlay_path, 
-                        audio=False,
-                        fps_source='fps'
-                    )
+                    # Load the video
+                    st.session_state.overlay_clip = VideoFileClip(st.session_state.overlay_path, audio=False)
                     st.session_state.overlay_duration = st.session_state.overlay_clip.duration
                     
                     st.success(f"✅ Overlay: {overlay_file.name}")
-                    
-                    # Show video info
-                    col_info1, col_info2 = st.columns(2)
-                    with col_info1:
-                        st.metric("Resolution", f"{overlay_info['width']}×{overlay_info['height']}")
-                        st.caption("Portrait" if overlay_info['is_portrait'] else "Landscape")
-                    with col_info2:
-                        st.metric("Duration", f"{overlay_info['duration']:.1f}s")
-                        st.caption(f"FPS: {overlay_info['fps']:.1f}")
+                    st.info(f"Duration: {st.session_state.overlay_duration:.1f}s")
+                    st.caption(f"Resolution: {width}×{height}")
                     
                     # Show preview
-                    preview_img = show_single_frame_preview(st.session_state.overlay_path)
-                    if preview_img:
-                        st.image(preview_img, caption="Overlay preview", use_column_width=True)
-                        
-                else:
-                    st.error("❌ Could not load video file. Try converting to MP4 format.")
+                    with st.spinner("Generating preview..."):
+                        preview_img = show_single_frame_preview(st.session_state.overlay_path)
+                        if preview_img:
+                            st.image(preview_img, caption="Overlay preview", use_column_width=True)
+                        else:
+                            st.warning("Could not generate preview")
                     
-            except Exception as e:
-                st.error(f"❌ Error loading overlay: {str(e)}")
-                # Try conversion as fallback
-                st.info("Attempting automatic conversion...")
-                try:
-                    st.session_state.overlay_path = convert_to_compatible_format(st.session_state.overlay_path)
-                    st.session_state.overlay_clip = VideoFileClip(st.session_state.overlay_path, audio=False)
-                    st.session_state.overlay_duration = st.session_state.overlay_clip.duration
-                    st.success("✅ Video converted and loaded successfully")
-                except:
-                    st.error("❌ Failed to process video file")
+                    st.session_state.overlay_loaded = True
+                    
+                except Exception as e:
+                    st.error(f"Error loading overlay: {str(e)}")
+                    st.info("""
+                    **Common solutions:**
+                    1. Convert video to MP4 format
+                    2. Ensure video has standard codec (H.264)
+                    3. Try a shorter video clip
+                    """)
 
 # ---------- TRIM SETTINGS ----------
-if st.session_state.bg_duration > 0:
-    st.subheader("✂️ Trim Settings")
+if st.session_state.bg_loaded and st.session_state.bg_duration > 0:
+    st.subheader("Trim Settings")
     
-    # Single slider for audio trim
+    # Audio trim settings
     st.markdown("**Audio Duration**")
-    audio_start = st.slider(
-        "Audio Start (seconds)",
-        0.0,
-        float(st.session_state.bg_duration),
-        0.0,
-        0.5,
-        key="audio_start"
-    )
+    col1, col2 = st.columns(2)
     
-    # Calculate audio end based on start + duration
-    max_audio_duration = st.session_state.bg_duration - audio_start
-    audio_duration = st.slider(
-        "Audio Duration (seconds)",
-        1.0,
-        float(max_audio_duration),
-        min(30.0, float(max_audio_duration)),
-        0.5,
-        key="audio_duration"
-    )
+    with col1:
+        audio_start = st.slider(
+            "Audio Start (seconds)",
+            0.0,
+            float(st.session_state.bg_duration),
+            0.0,
+            0.5,
+            key="audio_start"
+        )
+    
+    with col2:
+        max_audio_duration = st.session_state.bg_duration - audio_start
+        audio_duration = st.slider(
+            "Audio Duration (seconds)",
+            1.0,
+            float(max_audio_duration),
+            min(30.0, float(max_audio_duration)),
+            0.5,
+            key="audio_duration"
+        )
     
     audio_end = audio_start + audio_duration
     st.info(f"🎵 Audio: {audio_start:.1f}s to {audio_end:.1f}s ({audio_duration:.1f}s total)")
 
-if st.session_state.overlay_duration > 0:
-    # Single slider for overlay trim
+if st.session_state.overlay_loaded and st.session_state.overlay_duration > 0:
+    # Overlay trim settings
     st.markdown("**Overlay Video Trim**")
-    overlay_start = st.slider(
-        "Overlay Start (seconds)",
-        0.0,
-        float(st.session_state.overlay_duration),
-        0.0,
-        0.5,
-        key="overlay_start"
-    )
+    col1, col2 = st.columns(2)
     
-    max_overlay_duration = st.session_state.overlay_duration - overlay_start
-    overlay_duration = st.slider(
-        "Overlay Duration (seconds)",
-        1.0,
-        float(max_overlay_duration),
-        min(30.0, float(max_overlay_duration)),
-        0.5,
-        key="overlay_duration"
-    )
+    with col1:
+        overlay_start = st.slider(
+            "Overlay Start (seconds)",
+            0.0,
+            float(st.session_state.overlay_duration),
+            0.0,
+            0.5,
+            key="overlay_start"
+        )
+    
+    with col2:
+        max_overlay_duration = st.session_state.overlay_duration - overlay_start
+        overlay_duration = st.slider(
+            "Overlay Duration (seconds)",
+            1.0,
+            float(max_overlay_duration),
+            min(30.0, float(max_overlay_duration)),
+            0.5,
+            key="overlay_duration"
+        )
     
     overlay_end = overlay_start + overlay_duration
-    st.info(f"🎬 Overlay: {overlay_start:.1f}s to {overlay_end:.1f}s ({overlay_duration:.1f}s total)")
+    st.info(f"🎥 Overlay: {overlay_start:.1f}s to {overlay_end:.1f}s ({overlay_duration:.1f}s total)")
 
-# ---------- ENHANCED PROCESS FUNCTION ----------
-def process_video_mobile_compatible():
-    """Combine audio and video with mobile compatibility"""
+# ---------- IMPROVED PROCESS FUNCTION ----------
+def process_video_no_resize():
+    """Combine audio and video without any resizing"""
     try:
         # Get trim values
         audio_start = st.session_state.get('audio_start', 0)
@@ -358,300 +349,213 @@ def process_video_mobile_compatible():
         overlay_end = overlay_start + overlay_duration_val
         
         # Extract audio
-        with st.spinner("🔊 Extracting audio..."):
-            if st.session_state.bg_is_video:
-                audio_clip = st.session_state.bg_clip.audio.subclip(audio_start, audio_end)
+        with st.spinner("📻 Extracting audio..."):
+            if st.session_state.bg_is_video and st.session_state.bg_clip:
+                if st.session_state.bg_clip.audio is not None:
+                    audio_clip = st.session_state.bg_clip.audio.subclip(audio_start, audio_end)
+                else:
+                    st.error("No audio in video file")
+                    return None, 0, 0, 0
             else:
-                audio_clip = AudioFileClip(st.session_state.bg_path).subclip(audio_start, audio_end)
+                # Load audio file fresh
+                try:
+                    audio_clip = AudioFileClip(st.session_state.bg_path).subclip(audio_start, audio_end)
+                except:
+                    st.error("Could not load audio file")
+                    return None, 0, 0, 0
         
         final_audio_duration = audio_clip.duration
         
-        # Process overlay video
-        with st.spinner("🎬 Processing overlay..."):
-            # Load overlay with mobile-compatible settings
-            try:
-                overlay_clip = VideoFileClip(
-                    st.session_state.overlay_path, 
-                    audio=False,
-                    fps_source='fps'
-                )
-            except:
-                # Fallback loading method
-                overlay_clip = VideoFileClip(
-                    st.session_state.overlay_path,
-                    audio=False,
-                    fps_source='tbr'
-                )
-            
+        # Process overlay video (NO RESIZING)
+        with st.spinner("🎬 Processing overlay video..."):
             # Trim overlay
-            overlay = overlay_clip.subclip(overlay_start, overlay_end)
+            overlay = st.session_state.overlay_clip.subclip(overlay_start, overlay_end)
             
-            # Match durations
+            # Match durations - loop overlay if shorter than audio
             if overlay.duration < final_audio_duration:
                 loops_needed = int(final_audio_duration / overlay.duration) + 1
                 overlay_loops = [overlay] * loops_needed
-                overlay = concatenate_videoclips(overlay_loops)
+                overlay = concatenate_videoclips(overlay_loops, method="compose")
                 overlay = overlay.subclip(0, final_audio_duration)
             elif overlay.duration > final_audio_duration:
                 overlay = overlay.subclip(0, final_audio_duration)
             
-            # Ensure the overlay has audio attribute
-            if not hasattr(overlay, 'audio') or overlay.audio is None:
-                # Add silent audio track
-                silent_array = np.zeros((int(overlay.duration * 44100), 2), dtype=np.float32)
-                silent_audio = AudioArrayClip(silent_array, fps=44100)
-                overlay = overlay.set_audio(silent_audio)
-            
-            # Combine with audio
-            final_video = overlay.set_audio(audio_clip)
-        
-        # Save video with mobile optimization
-        with st.spinner("💾 Saving video (mobile optimized)..."):
-            output_path = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4").name
-            
-            # Get dimensions
+            # Get original dimensions
             width, height = overlay.size
             
-            # Mobile-friendly encoding
+            # Add the audio to video
+            final_video = overlay.set_audio(audio_clip)
+        
+        # Save video with proper encoding
+        with st.spinner("💾 Saving video..."):
+            output_path = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4").name
+            
+            # Write video with optimized settings for mobile compatibility
             final_video.write_videofile(
                 output_path,
-                fps=min(30, overlay.fps),  # Cap at 30fps for mobile
+                fps=overlay.fps,
                 codec="libx264",
                 audio_codec="aac",
-                bitrate="4M",  # Optimized for mobile
-                preset='fast',
-                ffmpeg_params=[
-                    '-movflags', '+faststart',  # Streaming optimization
-                    '-pix_fmt', 'yuv420p',      # Maximum compatibility
-                    '-profile:v', 'baseline',   # Mobile profile
-                    '-level', '3.0',
-                    '-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2'  # Even dimensions
-                ],
-                verbose=False,
-                logger=None,
+                audio_bitrate="192k",
+                bitrate="5000k",  # Lower bitrate for better compatibility
+                preset='fast',  # Faster encoding
                 threads=4,
-                temp_audiofile='temp-audio.m4a',
-                remove_temp=True
+                remove_temp=True,
+                logger=None,
+                ffmpeg_params=[
+                    '-movflags', '+faststart',  # Enable streaming
+                    '-pix_fmt', 'yuv420p',  # Better mobile compatibility
+                    '-profile:v', 'baseline',  # Maximum compatibility
+                    '-level', '3.0'
+                ]
             )
         
         # Cleanup
         audio_clip.close()
         overlay.close()
         final_video.close()
-        if 'overlay_clip' in locals():
-            overlay_clip.close()
         
         return output_path, final_audio_duration, width, height
         
     except Exception as e:
-        st.error(f"❌ Processing error: {str(e)}")
+        st.error(f"Processing error: {str(e)}")
         import traceback
-        with st.expander("🔍 Error details"):
+        st.error("Try converting your videos to MP4 format with H.264 codec")
+        with st.expander("Error details"):
             st.code(traceback.format_exc())
-        
-        # Try alternative method if first fails
-        st.info("🔄 Trying alternative processing method...")
-        try:
-            return process_video_simple()
-        except:
-            return None, 0, 0, 0
-
-def process_video_simple():
-    """Simpler processing method as fallback"""
-    try:
-        # Simple FFMPEG command as fallback
-        output_path = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4").name
-        
-        audio_start = st.session_state.get('audio_start', 0)
-        audio_duration_val = st.session_state.get('audio_duration', 30)
-        
-        cmd = [
-            'ffmpeg',
-            '-ss', str(audio_start),
-            '-t', str(audio_duration_val),
-            '-i', st.session_state.bg_path,
-            '-i', st.session_state.overlay_path,
-            '-c:v', 'libx264',
-            '-c:a', 'aac',
-            '-map', '0:a:0',
-            '-map', '1:v:0',
-            '-shortest',
-            '-pix_fmt', 'yuv420p',
-            '-movflags', '+faststart',
-            '-y', output_path
-        ]
-        
-        subprocess.run(cmd, check=True, capture_output=True)
-        
-        # Get video info
-        clip = VideoFileClip(output_path, audio=False)
-        duration = clip.duration
-        width, height = clip.size
-        clip.close()
-        
-        return output_path, duration, width, height
-        
-    except Exception as e:
-        st.error(f"❌ Fallback processing failed: {str(e)}")
         return None, 0, 0, 0
 
 # ---------- CREATE BUTTON ----------
 st.divider()
 
-# Check if both files are uploaded
-files_ready = st.session_state.bg_path and st.session_state.overlay_path
+# Check if both files are uploaded and loaded
+files_ready = (st.session_state.bg_loaded and st.session_state.overlay_loaded and 
+               st.session_state.bg_path and st.session_state.overlay_path)
 
-if st.button("🚀 Create Final Video", 
+create_disabled = not files_ready
+
+if st.button("🎬 Create Final Video", 
              type="primary", 
-             disabled=not files_ready,
-             use_container_width=True,
-             help="Click to process and create your video"):
+             disabled=create_disabled,
+             use_container_width=True):
     
     if not files_ready:
         st.warning("⚠️ Please upload both background and overlay files first")
         st.stop()
     
-    # Add processing option
-    processing_method = st.radio(
-        "Processing method:",
-        ["Mobile Optimized (Recommended)", "Simple Processing"],
-        horizontal=True,
-        index=0
-    )
-    
     # Process video
-    if processing_method == "Mobile Optimized (Recommended)":
-        output_path, duration, width, height = process_video_mobile_compatible()
-    else:
-        output_path, duration, width, height = process_video_simple()
+    with st.spinner("🚀 Creating your video..."):
+        output_path, duration, width, height = process_video_no_resize()
     
     if output_path and os.path.exists(output_path):
         st.success("✅ Video created successfully!")
         
-        # Show video
-        st.subheader("📺 Your Video Preview")
-        display_video_with_fallback(output_path)
+        # Show video with better container
+        st.subheader("🎥 Your Video Preview")
         
-        # Show detailed info
+        # Create a container for the video
+        video_container = st.container()
+        
+        with video_container:
+            try:
+                # Read video file as bytes for display
+                with open(output_path, "rb") as video_file:
+                    video_bytes = video_file.read()
+                
+                # Display video
+                st.video(video_bytes, format="video/mp4")
+                
+            except Exception as e:
+                st.warning("Preview unavailable. Please download the video to view it.")
+                st.info("This is usually a browser compatibility issue. The video file is created successfully.")
+        
+        # Show video info
         file_size = os.path.getsize(output_path) / (1024 * 1024)
         
-        col1, col2, col3, col4 = st.columns(4)
+        col1, col2, col3 = st.columns(3)
         with col1:
             st.metric("Duration", f"{duration:.1f}s")
         with col2:
             st.metric("Resolution", f"{width}×{height}")
         with col3:
             st.metric("Size", f"{file_size:.1f}MB")
-        with col4:
-            st.metric("Aspect", f"{width/height:.2f}" if height > 0 else "N/A")
         
         # Download button
-        st.divider()
         with open(output_path, "rb") as f:
-            video_bytes = f.read()
-            b64 = base64.b64encode(video_bytes).decode()
-            href = f'<a href="data:video/mp4;base64,{b64}" download="mobile_video_{width}x{height}.mp4" style="text-decoration: none;">'
+            video_data = f.read()
             
-            col_dl1, col_dl2, col_dl3 = st.columns([1,2,1])
-            with col_dl2:
-                st.markdown(f"""
-                <div style="text-align: center;">
-                    {href}
-                    <button style="background-color: #4CAF50; color: white; padding: 14px 40px; 
-                    text-align: center; text-decoration: none; display: inline-block; 
-                    font-size: 18px; margin: 4px 2px; cursor: pointer; border-radius: 8px;
-                    border: none; width: 100%;">
-                    📥 Download Video ({file_size:.1f}MB)
-                    </button>
-                    </a>
-                </div>
-                """, unsafe_allow_html=True)
+            st.download_button(
+                "📥 Download Video",
+                video_data,
+                file_name=f"mobile_video_{width}x{height}.mp4",
+                mime="video/mp4",
+                type="primary",
+                use_container_width=True
+            )
         
-        # Cleanup temp files
-        with st.spinner("🧹 Cleaning up temporary files..."):
-            try:
-                temp_files = [
-                    st.session_state.bg_path,
-                    st.session_state.overlay_path,
-                    output_path
-                ]
-                for temp_file in temp_files:
-                    if temp_file and os.path.exists(temp_file):
-                        os.unlink(temp_file)
-            except:
-                pass
+        # Show conversion tips if needed
+        if file_size > 50:  # If file is larger than 50MB
+            st.info("💡 **Tip**: For smaller file size, try using shorter clips or lower the audio bitrate in the code.")
         
-        # Clear session
-        for key in ['bg_path', 'overlay_path', 'bg_clip', 'overlay_clip']:
-            if key in st.session_state:
-                st.session_state[key] = None
-        
+        # Cleanup
+        cleanup_old_files()
         gc.collect()
-        st.balloons()
+        
     else:
-        st.error("❌ Failed to create video. Please try different files or settings.")
+        st.error("❌ Failed to create video. Please try again with different files.")
 
-# ---------- TROUBLESHOOTING GUIDE ----------
-with st.expander("🔧 Troubleshooting Guide", expanded=False):
+# ---------- TROUBLESHOOTING SECTION ----------
+with st.expander("🔧 Troubleshooting Common Issues"):
     st.markdown("""
-    ### Common Issues & Solutions:
+    ### If videos don't show overlay or have issues:
     
-    **1. Video doesn't show overlay on mobile:**
-    - Ensure video is MP4 format with H.264 codec
-    - Use even dimensions (e.g., 1920x1080, not 1921x1080)
-    - Try "Mobile Optimized" processing
+    **1. Convert to MP4/H.264:**
+    - Use HandBrake or FFmpeg to convert videos
+    - Command: `ffmpeg -i input.mov -c:v libx264 -c:a aac output.mp4`
     
-    **2. Audio/Video sync issues:**
-    - Use shorter clips (under 5 minutes)
-    - Avoid Variable Frame Rate (VFR) videos
-    - Convert to constant frame rate (30fps recommended)
+    **2. Check video codec:**
+    - Ensure videos use H.264 codec
+    - Audio should be AAC
     
-    **3. Video won't play on specific devices:**
-    - iPhone/Safari: Use .mp4 with AAC audio
-    - Android: Most formats work, MP4 is safest
-    - Older devices: Use lower resolution (720p)
+    **3. Reduce video resolution:**
+    - Try 1080p or 720p instead of 4K
+    - Large files may cause processing issues
     
-    **4. File size too large:**
-    - Shorter duration reduces size
-    - Lower resolution videos are smaller
-    - Consider compressing source videos first
+    **4. Clear cache:**
+    - Streamlit caches files, sometimes causing issues
+    - Use "Clear cache" in Streamlit menu
     
-    **5. Processing fails:**
-    - Try smaller files (<500MB)
-    - Convert to MP4 before uploading
-    - Use Simple Processing method
+    **5. Shorter clips:**
+    - Try with shorter videos (under 2 minutes) first
+    - Then gradually increase duration
     """)
 
 # ---------- INSTRUCTIONS ----------
 with st.expander("📖 How to Use", expanded=True):
     st.markdown("""
-    ### Mobile-Friendly Video Maker
+    ### Mobile Video Maker
     
-    **What this does:**
-    1. Takes audio from background file
-    2. Takes video from overlay file
-    3. Trims both to your desired length
-    4. Combines them with mobile optimization
-    5. Outputs MP4 with maximum device compatibility
+    **Features:**
+    - Trim audio from any video/audio file
+    - Trim overlay video
+    - Combine without resizing (keeps original quality)
+    - Mobile-optimized output
     
-    **Best Practices:**
-    - **Background:** MP3 or MP4 files work best
-    - **Overlay:** MP4 with H.264 codec recommended
-    - **Duration:** Keep under 10 minutes for best results
-    - **Resolution:** Even dimensions (e.g., 1080x1920, not 1081x1920)
+    **Steps:**
+    1. **Upload Background** - MP3, MP4, or MOV with audio
+    2. **Upload Overlay** - MP4 video (best compatibility)
+    3. **Trim Audio** - Select start point and duration
+    4. **Trim Video** - Select start point and duration
+    5. **Click Create** - Get your combined video
     
-    **Processing Options:**
-    - **Mobile Optimized:** Best for sharing on phones/tablets
-    - **Simple Processing:** Faster, but may have compatibility issues
+    **For best results:**
+    - Use MP4 files with H.264 codec
+    - Keep videos under 5 minutes for faster processing
+    - Ensure overlay video has standard resolution (720p, 1080p)
     
-    **Output Features:**
-    - No resizing (keeps original dimensions)
-    - Mobile-optimized encoding
-    - Fast-start for instant playback
-    - Maximum device compatibility
+    **Output:** Video with original dimensions, ready for mobile
     """)
 
 # ---------- FOOTER ----------
 st.divider()
-st.caption("🎥 Mobile Video Maker • No Resizing • Maximum Compatibility • Version 2.1")
-st.caption("For best results, use MP4 files with standard frame rates (24/30fps)")
+st.caption(f"{my_title} • No resizing • Mobile compatible • Keep original dimensions")
