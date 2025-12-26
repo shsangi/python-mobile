@@ -12,7 +12,7 @@ from moviepy.editor import (
     ImageClip,
     concatenate_videoclips
 )
-my_title = "🎬 Video Maker V 2:1"
+my_title = "🎬 Moble Video Maker V 2:1"
 # ---------- PAGE CONFIG ----------
 st.set_page_config(
     page_title= my_title,
