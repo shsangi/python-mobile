@@ -71,21 +71,44 @@ def apply_resize_to_clip(clip, target_size):
 c1, c2 = st.columns(2)
 
 with c1:
-    bg = st.file_uploader("Background Audio/Video", type=["mp3", "mp4", "mov", "m4a"])
+    # Updated to include common recording formats
+    bg = st.file_uploader("Background Audio/Video", 
+                         type=["mp3", "wav", "m4a", "aac", "ogg", "flac",  # Audio formats
+                               "mp4", "mov", "avi", "mkv"])  # Video formats
     if bg:
         bg_path = save_file(bg)
-        is_vid = bg.name.endswith(('.mp4', '.mov'))
-        clip = VideoFileClip(bg_path) if is_vid else None
-        audio = clip.audio if is_vid else AudioFileClip(bg_path)
-        st.session_state.bg_dur = float(audio.duration)
-        st.session_state.a_trim = [0.0, min(30.0, float(audio.duration))]
-        st.success(f"✅ {bg.name} ({audio.duration:.1f}s)")
+        
+        # Check if it's a video file or audio file
+        video_extensions = ('.mp4', '.mov', '.avi', '.mkv')
+        audio_extensions = ('.mp3', '.wav', '.m4a', '.aac', '.ogg', '.flac')
+        
+        is_vid = bg.name.lower().endswith(video_extensions)
+        is_audio = bg.name.lower().endswith(audio_extensions)
+        
+        if is_vid:
+            clip = VideoFileClip(bg_path)
+            audio = clip.audio
+            st.session_state.bg_dur = float(audio.duration)
+            st.session_state.a_trim = [0.0, min(30.0, float(audio.duration))]
+            st.success(f"✅ {bg.name} (Video with audio: {audio.duration:.1f}s)")
+        elif is_audio:
+            audio = AudioFileClip(bg_path)
+            st.session_state.bg_dur = float(audio.duration)
+            st.session_state.a_trim = [0.0, min(30.0, float(audio.duration))]
+            st.success(f"✅ {bg.name} (Audio only: {audio.duration:.1f}s)")
+        else:
+            st.error(f"❌ Unsupported file format: {bg.name}")
+            bg = None
         
 with c2:
-    ov = st.file_uploader("Overlay (Video/Image)", type=["mp4", "mov", "jpg", "jpeg", "png", "gif"])
+    ov = st.file_uploader("Overlay (Video/Image)", 
+                         type=["mp4", "mov", "avi", "mkv",  # Video formats
+                               "jpg", "jpeg", "png", "gif", "bmp", "webp"])  # Image formats
     if ov:
         ov_path = save_file(ov)
-        is_img = ov.name.endswith(('.jpg', '.jpeg', '.png', '.gif'))
+        image_extensions = ('.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp')
+        is_img = ov.name.lower().endswith(image_extensions)
+        
         if is_img:
             img = Image.open(ov_path)
             st.image(img, width=300)
@@ -102,7 +125,8 @@ with c2:
 # Audio trim
 if st.session_state.bg_dur > 0:
     st.subheader("Audio Selection")
-    a_trim = st.slider("Audio range", 0.0, float(st.session_state.bg_dur), tuple(map(float, st.session_state.a_trim)), 0.5, format="%.1fs")
+    a_trim = st.slider("Audio range", 0.0, float(st.session_state.bg_dur), 
+                      tuple(map(float, st.session_state.a_trim)), 0.5, format="%.1fs")
     st.session_state.a_trim = list(a_trim)
     c1, c2, c3 = st.columns(3)
     c1.metric("Start", fmt_time(a_trim[0]))
@@ -110,18 +134,21 @@ if st.session_state.bg_dur > 0:
     c3.metric("Duration", fmt_time(a_trim[1] - a_trim[0]))
 
 # Video/Image overlay settings
-if ov and not is_img and st.session_state.ov_dur > 0:
-    st.subheader("Video Overlay")
-    v_trim = st.slider("Video range", 0.0, float(st.session_state.ov_dur), tuple(map(float, st.session_state.v_trim)), 0.5, format="%.1fs")
-    st.session_state.v_trim = list(v_trim)
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Start", fmt_time(v_trim[0]))
-    c2.metric("End", fmt_time(v_trim[1]))
-    c3.metric("Duration", fmt_time(v_trim[1] - v_trim[0]))
-elif ov and is_img and st.session_state.bg_dur > 0:
-    st.subheader("Image Duration")
-    max_dur = st.session_state.a_trim[1] - st.session_state.a_trim[0]
-    st.session_state.img_dur = st.slider("Display time", 1.0, float(max_dur), min(30.0, float(max_dur)), 0.5, format="%.1fs")
+if 'ov' in locals() and ov and 'is_img' in locals():
+    if not is_img and st.session_state.ov_dur > 0:
+        st.subheader("Video Overlay")
+        v_trim = st.slider("Video range", 0.0, float(st.session_state.ov_dur), 
+                          tuple(map(float, st.session_state.v_trim)), 0.5, format="%.1fs")
+        st.session_state.v_trim = list(v_trim)
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Start", fmt_time(v_trim[0]))
+        c2.metric("End", fmt_time(v_trim[1]))
+        c3.metric("Duration", fmt_time(v_trim[1] - v_trim[0]))
+    elif is_img and st.session_state.bg_dur > 0:
+        st.subheader("Image Duration")
+        max_dur = st.session_state.a_trim[1] - st.session_state.a_trim[0]
+        st.session_state.img_dur = st.slider("Display time", 1.0, float(max_dur), 
+                                           min(30.0, float(max_dur)), 0.5, format="%.1fs")
 
 # Output format selection
 if bg and ov:
@@ -140,8 +167,13 @@ if st.button("🎬 Create Video", type="primary", disabled=not (bg and ov), use_
     try:
         with st.spinner("Processing video..."):
             # Extract audio
-            audio_src = clip if is_vid else AudioFileClip(bg_path)
-            audio = audio_src.audio.subclip(*st.session_state.a_trim) if is_vid else audio_src.subclip(*st.session_state.a_trim)
+            if is_vid:
+                audio_src = clip
+                audio = audio_src.audio.subclip(*st.session_state.a_trim)
+            else:
+                audio_src = AudioFileClip(bg_path)
+                audio = audio_src.subclip(*st.session_state.a_trim)
+            
             dur = audio.duration
             
             # Process overlay
@@ -209,8 +241,10 @@ if st.button("🎬 Create Video", type="primary", disabled=not (bg and ov), use_
             clip.close()
         else:
             audio_src.close()
-        ov_final.close()
-        final.close()
+        if 'ov_final' in locals():
+            ov_final.close()
+        if 'final' in locals():
+            final.close()
         
         import time
         time.sleep(0.5)
