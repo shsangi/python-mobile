@@ -6,10 +6,11 @@ import numpy as np
 from moviepy.editor import VideoFileClip, AudioFileClip, ImageClip, concatenate_videoclips, CompositeVideoClip
 from moviepy.video.VideoClip import ColorClip
 import cv2
+import subprocess
 
-st.set_page_config(page_title="🎬P'S Video Maker", layout="centered") 
+st.set_page_config(page_title="🎬 Mobile Video Maker v2", layout="centered")
 st.markdown('<style>[data-testid="stSidebar"]{display:none}.stButton>button{width:100%}</style>', unsafe_allow_html=True)
-st.title("🎬P'S Video Maker")
+st.title("🎬 Mobile Video Maker")
 st.caption("Combine audio with video - Choose your output format")
 
 # Preset dimensions for mobile
@@ -33,6 +34,33 @@ def save_file(f):
     tmp.write(f.getvalue())
     tmp.close()
     return tmp.name
+
+def convert_audio_to_wav(input_path):
+    """Convert problematic audio formats to WAV using FFmpeg"""
+    output_path = tempfile.NamedTemporaryFile(delete=False, suffix='.wav').name
+    
+    try:
+        # Try to convert using FFmpeg
+        cmd = [
+            'ffmpeg', '-i', input_path,
+            '-acodec', 'pcm_s16le',
+            '-ar', '44100',
+            '-ac', '2',
+            '-y',  # Overwrite output file
+            output_path
+        ]
+        
+        # Run FFmpeg
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        
+        if result.returncode != 0:
+            st.error(f"FFmpeg conversion failed: {result.stderr}")
+            return input_path  # Return original if conversion fails
+        
+        return output_path
+    except Exception as e:
+        st.warning(f"Audio conversion failed, using original: {e}")
+        return input_path
 
 def fmt_time(s):
     return f"{int(s//60):02d}:{int(s%60):02d}" if s < 3600 else f"{int(s//3600):02d}:{int((s%3600)//60):02d}:{int(s%60):02d}"
@@ -71,59 +99,101 @@ def apply_resize_to_clip(clip, target_size):
 c1, c2 = st.columns(2)
 
 with c1:
-    # Updated to include common recording formats
+    # ALL audio formats including call recording formats
     bg = st.file_uploader("Background Audio/Video", 
-                         type=["mp3", "wav", "m4a", "aac", "ogg", "flac",  # Audio formats
-                               "mp4", "mov", "avi", "mkv"])  # Video formats
+                         type=[
+                             # Common audio formats
+                             "mp3", "wav", "m4a", 
+                             # Call recording formats
+                             "aac", "opus", "ogg", "amr", "3gp",
+                             # Video formats (may contain audio)
+                             "mp4", "mov", "avi", "mkv", "webm"
+                         ])
     if bg:
         bg_path = save_file(bg)
         
-        # Check if it's a video file or audio file
-        video_extensions = ('.mp4', '.mov', '.avi', '.mkv')
-        audio_extensions = ('.mp3', '.wav', '.m4a', '.aac', '.ogg', '.flac')
+        # Check file type
+        file_ext = os.path.splitext(bg.name.lower())[1]
         
-        is_vid = bg.name.lower().endswith(video_extensions)
-        is_audio = bg.name.lower().endswith(audio_extensions)
+        # Problematic formats that might need conversion
+        problematic_formats = ['.aac', '.opus', '.amr', '.3gp', '.ogg']
         
-        if is_vid:
-            clip = VideoFileClip(bg_path)
-            audio = clip.audio
-            st.session_state.bg_dur = float(audio.duration)
-            st.session_state.a_trim = [0.0, min(30.0, float(audio.duration))]
-            st.success(f"✅ {bg.name} (Video with audio: {audio.duration:.1f}s)")
-        elif is_audio:
-            audio = AudioFileClip(bg_path)
-            st.session_state.bg_dur = float(audio.duration)
-            st.session_state.a_trim = [0.0, min(30.0, float(audio.duration))]
-            st.success(f"✅ {bg.name} (Audio only: {audio.duration:.1f}s)")
-        else:
-            st.error(f"❌ Unsupported file format: {bg.name}")
+        if file_ext in problematic_formats:
+            st.info(f"🔄 Converting {file_ext} audio file for compatibility...")
+            converted_path = convert_audio_to_wav(bg_path)
+            
+            if converted_path != bg_path:
+                # Update to use converted file
+                bg_path = converted_path
+                st.success(f"✅ Converted {bg.name} to WAV for compatibility")
+        
+        # Determine if it's video or audio
+        video_extensions = ('.mp4', '.mov', '.avi', '.mkv', '.webm')
+        is_vid = file_ext in video_extensions
+        
+        try:
+            if is_vid:
+                clip = VideoFileClip(bg_path)
+                audio = clip.audio
+                if audio:
+                    st.session_state.bg_dur = float(audio.duration)
+                    st.session_state.a_trim = [0.0, min(30.0, float(audio.duration))]
+                    st.success(f"✅ {bg.name} (Video with audio: {audio.duration:.1f}s)")
+                else:
+                    st.error("❌ No audio track found in video file")
+                    bg = None
+            else:
+                # Try to load as audio
+                try:
+                    audio = AudioFileClip(bg_path)
+                    st.session_state.bg_dur = float(audio.duration)
+                    st.session_state.a_trim = [0.0, min(30.0, float(audio.duration))]
+                    st.success(f"✅ {bg.name} (Audio: {audio.duration:.1f}s)")
+                except Exception as e:
+                    st.error(f"❌ Cannot read audio file: {e}")
+                    st.info("Trying alternative loading method...")
+                    # Try with explicit audio codec
+                    try:
+                        audio = AudioFileClip(bg_path, fps=44100)
+                        st.session_state.bg_dur = float(audio.duration)
+                        st.session_state.a_trim = [0.0, min(30.0, float(audio.duration))]
+                        st.success(f"✅ {bg.name} loaded with fallback (Audio: {audio.duration:.1f}s)")
+                    except:
+                        st.error("❌ Failed to load audio file. Try converting it to MP3 or WAV first.")
+                        bg = None
+        except Exception as e:
+            st.error(f"❌ Error loading file: {e}")
             bg = None
         
 with c2:
     ov = st.file_uploader("Overlay (Video/Image)", 
-                         type=["mp4", "mov", "avi", "mkv",  # Video formats
-                               "jpg", "jpeg", "png", "gif", "bmp", "webp"])  # Image formats
+                         type=["mp4", "mov", "avi", "mkv", "webm",
+                               "jpg", "jpeg", "png", "gif", "bmp", "webp"])
     if ov:
         ov_path = save_file(ov)
         image_extensions = ('.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp')
-        is_img = ov.name.lower().endswith(image_extensions)
+        file_ext = os.path.splitext(ov.name.lower())[1]
+        is_img = file_ext in image_extensions
         
         if is_img:
             img = Image.open(ov_path)
             st.image(img, width=300)
             st.success(f"✅ Image: {ov.name}")
         else:
-            ov_clip = VideoFileClip(ov_path, audio=False)
-            st.session_state.ov_dur = float(ov_clip.duration)
-            st.session_state.v_trim = [0.0, min(30.0, float(ov_clip.duration))]
-            w, h = ov_clip.size
-            orientation = "Portrait" if h > w else "Landscape" if w > h else "Square"
-            st.success(f"✅ Video: {ov.name} ({ov_clip.duration:.1f}s)")
-            st.info(f"📐 {w}×{h} ({orientation})")
+            try:
+                ov_clip = VideoFileClip(ov_path, audio=False)
+                st.session_state.ov_dur = float(ov_clip.duration)
+                st.session_state.v_trim = [0.0, min(30.0, float(ov_clip.duration))]
+                w, h = ov_clip.size
+                orientation = "Portrait" if h > w else "Landscape" if w > h else "Square"
+                st.success(f"✅ Video: {ov.name} ({ov_clip.duration:.1f}s)")
+                st.info(f"📐 {w}×{h} ({orientation})")
+            except Exception as e:
+                st.error(f"❌ Error loading video: {e}")
+                ov = None
 
 # Audio trim
-if st.session_state.bg_dur > 0:
+if 'bg' in locals() and bg and st.session_state.bg_dur > 0:
     st.subheader("Audio Selection")
     a_trim = st.slider("Audio range", 0.0, float(st.session_state.bg_dur), 
                       tuple(map(float, st.session_state.a_trim)), 0.5, format="%.1fs")
@@ -151,7 +221,7 @@ if 'ov' in locals() and ov and 'is_img' in locals():
                                            min(30.0, float(max_dur)), 0.5, format="%.1fs")
 
 # Output format selection
-if bg and ov:
+if 'bg' in locals() and bg and 'ov' in locals() and ov:
     st.subheader("📐 Output Format")
     selected_preset = st.selectbox("Choose output dimensions", list(PRESETS.keys()), index=0)
     target_dims = PRESETS[selected_preset]
@@ -163,14 +233,16 @@ if bg and ov:
 
 # Process button
 st.divider()
-if st.button("🎬 Create Video", type="primary", disabled=not (bg and ov), use_container_width=True):
+process_disabled = not ('bg' in locals() and bg and 'ov' in locals() and ov)
+if st.button("🎬 Create Video", type="primary", disabled=process_disabled, use_container_width=True):
     try:
         with st.spinner("Processing video..."):
-            # Extract audio
+            # Extract audio (use the clip if it's video, otherwise AudioFileClip)
             if is_vid:
                 audio_src = clip
                 audio = audio_src.audio.subclip(*st.session_state.a_trim)
             else:
+                # Reload audio file to ensure fresh handle
                 audio_src = AudioFileClip(bg_path)
                 audio = audio_src.subclip(*st.session_state.a_trim)
             
@@ -208,6 +280,8 @@ if st.button("🎬 Create Video", type="primary", disabled=not (bg and ov), use_
             final = ov_final.set_audio(audio).set_duration(dur)
             out = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4").name
             
+            # Write with verbose output for debugging
+            st.info("⏳ Rendering video...")
             final.write_videofile(
                 out, 
                 fps=30,
@@ -216,7 +290,8 @@ if st.button("🎬 Create Video", type="primary", disabled=not (bg and ov), use_
                 bitrate="8M", 
                 verbose=False, 
                 logger=None,
-                preset='medium'
+                preset='medium',
+                threads=4
             )
         
         st.success("✅ Video created successfully!")
@@ -234,24 +309,27 @@ if st.button("🎬 Create Video", type="primary", disabled=not (bg and ov), use_
             st.download_button("📥 Download Video", f, f"{format_name}_{w}x{h}.mp4", "video/mp4", type="primary", use_container_width=True)
         
         # Cleanup
-        audio.close()
-        if not is_img:
-            ov_clip.close()
-        if is_vid:
-            clip.close()
-        else:
-            audio_src.close()
-        if 'ov_final' in locals():
-            ov_final.close()
-        if 'final' in locals():
-            final.close()
-        
-        import time
-        time.sleep(0.5)
-        
         try:
-            os.unlink(bg_path)
-            os.unlink(ov_path)
+            audio.close()
+            if not is_img:
+                ov_clip.close()
+            if is_vid:
+                clip.close()
+            else:
+                audio_src.close()
+            if 'ov_final' in locals():
+                ov_final.close()
+            if 'final' in locals():
+                final.close()
+        except:
+            pass
+        
+        # Cleanup temp files
+        try:
+            if 'bg_path' in locals() and os.path.exists(bg_path):
+                os.unlink(bg_path)
+            if 'ov_path' in locals() and os.path.exists(ov_path):
+                os.unlink(ov_path)
         except:
             pass
         
@@ -259,3 +337,31 @@ if st.button("🎬 Create Video", type="primary", disabled=not (bg and ov), use_
         st.error(f"❌ Error: {e}")
         import traceback
         st.code(traceback.format_exc())
+
+# Add troubleshooting info
+st.divider()
+with st.expander("💡 Troubleshooting Audio Files"):
+    st.markdown("""
+    **Common issues with call recording files:**
+    
+    1. **AAC/Opus files not working?** 
+       - The app tries to automatically convert them to WAV
+       - Make sure FFmpeg is installed on your system
+    
+    2. **If automatic conversion fails:**
+       - Convert your audio file to MP3 or WAV first using:
+         - Online converters (online-audio-converter.com)
+         - VLC media player (Media > Convert/Save)
+         - Audacity (free audio editor)
+    
+    3. **Still having issues?**
+       - Try recording in MP3 format if your recording app allows it
+       - Use standard formats like MP3 or WAV for best compatibility
+    
+    **Supported call recording formats:**
+    - ✅ `.aac` (Advanced Audio Coding)
+    - ✅ `.opus` (Opus audio)
+    - ✅ `.amr` (Adaptive Multi-Rate - common for voice recordings)
+    - ✅ `.3gp` (3GPP audio/video container)
+    - ✅ `.ogg` (Ogg Vorbis)
+    """)
