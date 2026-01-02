@@ -7,9 +7,9 @@ from moviepy.editor import VideoFileClip, AudioFileClip, ImageClip, concatenate_
 from moviepy.video.VideoClip import ColorClip
 import cv2
 
-st.set_page_config(page_title="🎬P'S Video Maker V2", layout="centered") 
+st.set_page_config(page_title="🎬P'S Video Maker", layout="centered") 
 st.markdown('<style>[data-testid="stSidebar"]{display:none}.stButton>button{width:100%}</style>', unsafe_allow_html=True)
-st.title("🎬 Mobile Video Maker")
+st.title("🎬P'S Video Maker")
 st.caption("Combine audio with video - Choose your output format")
 
 # Preset dimensions for mobile
