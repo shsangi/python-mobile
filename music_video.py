@@ -8,9 +8,9 @@ from moviepy.video.VideoClip import ColorClip
 import cv2
 import mimetypes
 
-st.set_page_config(page_title="🎬 P's Mobile Video", layout="centered")
+st.set_page_config(page_title="🎬 Mobile Video Maker v2", layout="centered")
 st.markdown('<style>[data-testid="stSidebar"]{display:none}.stButton>button{width:100%}</style>', unsafe_allow_html=True)
-st.title("🎬 P's Mobile Video")
+st.title("🎬 Mobile Video Maker")
 st.caption("Combine audio with video - Choose your output format")
 
 # Preset dimensions for mobile
@@ -128,23 +128,25 @@ with c1:
     if bg:
         try:
             bg_path = save_file(bg)
+            bg_clip = None
+            bg_audio = None
             
             # Determine file type
             if is_video_file(bg_path):
                 # Try to load as video first
                 try:
-                    clip = VideoFileClip(bg_path)
-                    if clip.audio is not None:
-                        audio = clip.audio
-                        st.session_state.bg_dur = float(audio.duration)
-                        st.success(f"✅ Video with audio: {bg.name} ({audio.duration:.1f}s)")
+                    bg_clip = VideoFileClip(bg_path)
+                    if bg_clip.audio is not None:
+                        bg_audio = bg_clip.audio
+                        st.session_state.bg_dur = float(bg_audio.duration)
+                        st.success(f"✅ Video with audio: {bg.name} ({bg_audio.duration:.1f}s)")
                     else:
                         # Video without audio, try as audio file
-                        clip.close()
+                        bg_clip.close()
                         try:
-                            audio = AudioFileClip(bg_path)
-                            st.session_state.bg_dur = float(audio.duration)
-                            st.success(f"✅ Audio: {bg.name} ({audio.duration:.1f}s)")
+                            bg_audio = AudioFileClip(bg_path)
+                            st.session_state.bg_dur = float(bg_audio.duration)
+                            st.success(f"✅ Audio: {bg.name} ({bg_audio.duration:.1f}s)")
                         except:
                             st.error(f"❌ {bg.name} has no audio track")
                             bg = None
@@ -154,10 +156,12 @@ with c1:
             
             elif is_audio_file(bg_path):
                 try:
-                    audio = AudioFileClip(bg_path)
-                    st.session_state.bg_dur = float(audio.duration)
-                    st.session_state.a_trim = [0.0, min(30.0, float(audio.duration))]
-                    st.success(f"✅ Audio: {bg.name} ({audio.duration:.1f}s)")
+                    bg_audio = AudioFileClip(bg_path)
+                    st.session_state.bg_dur = float(bg_audio.duration)
+                    # Ensure trim range doesn't exceed duration
+                    max_end = min(30.0, float(bg_audio.duration))
+                    st.session_state.a_trim = [0.0, max_end]
+                    st.success(f"✅ Audio: {bg.name} ({bg_audio.duration:.1f}s)")
                 except Exception as e:
                     st.error(f"❌ Cannot load audio file: {e}")
                     bg = None
@@ -165,6 +169,12 @@ with c1:
             else:
                 st.error(f"❌ Unsupported file type: {bg.name}")
                 bg = None
+                
+            # Close resources if we won't use them later
+            if bg_clip and bg:
+                bg_clip.close()
+            if bg_audio and bg:
+                bg_audio.close()
                 
         except Exception as e:
             st.error(f"❌ Error processing file: {e}")
@@ -192,21 +202,40 @@ with c2:
             try:
                 ov_clip = VideoFileClip(ov_path, audio=False)
                 st.session_state.ov_dur = float(ov_clip.duration)
-                st.session_state.v_trim = [0.0, min(30.0, float(ov_clip.duration))]
+                # Ensure trim range doesn't exceed duration
+                max_end = min(30.0, float(ov_clip.duration))
+                st.session_state.v_trim = [0.0, max_end]
                 w, h = ov_clip.size
                 orientation = "Portrait" if h > w else "Landscape" if w > h else "Square"
                 st.success(f"✅ Video: {ov.name} ({ov_clip.duration:.1f}s)")
                 st.info(f"📐 {w}×{h} ({orientation})")
+                ov_clip.close()
             except Exception as e:
                 st.error(f"❌ Cannot load video: {e}")
                 ov = None
 
-# Audio trim
+# Audio trim - FIXED: Ensure slider doesn't exceed actual duration
 if bg and st.session_state.bg_dur > 0:
     st.subheader("Audio Selection")
-    a_trim = st.slider("Audio range", 0.0, float(st.session_state.bg_dur), 
+    
+    # Get actual duration
+    actual_duration = float(st.session_state.bg_dur)
+    
+    # Ensure current trim values are within bounds
+    current_start = min(st.session_state.a_trim[0], actual_duration - 0.1)
+    current_end = min(st.session_state.a_trim[1], actual_duration)
+    
+    # Update session state with corrected values
+    st.session_state.a_trim = [current_start, current_end]
+    
+    # Create slider with proper bounds
+    a_trim = st.slider("Audio range", 0.0, actual_duration, 
                       tuple(map(float, st.session_state.a_trim)), 0.5, format="%.1fs")
+    
+    # Ensure end doesn't exceed duration (double-check)
+    a_trim = (a_trim[0], min(a_trim[1], actual_duration))
     st.session_state.a_trim = list(a_trim)
+    
     c1, c2, c3 = st.columns(3)
     c1.metric("Start", fmt_time(a_trim[0]))
     c2.metric("End", fmt_time(a_trim[1]))
@@ -215,18 +244,40 @@ if bg and st.session_state.bg_dur > 0:
 # Video/Image overlay settings
 if ov and not is_img and st.session_state.ov_dur > 0:
     st.subheader("Video Overlay")
-    v_trim = st.slider("Video range", 0.0, float(st.session_state.ov_dur), 
+    
+    # Get actual duration
+    actual_duration = float(st.session_state.ov_dur)
+    
+    # Ensure current trim values are within bounds
+    current_start = min(st.session_state.v_trim[0], actual_duration - 0.1)
+    current_end = min(st.session_state.v_trim[1], actual_duration)
+    
+    # Update session state with corrected values
+    st.session_state.v_trim = [current_start, current_end]
+    
+    v_trim = st.slider("Video range", 0.0, actual_duration, 
                       tuple(map(float, st.session_state.v_trim)), 0.5, format="%.1fs")
+    
+    # Ensure end doesn't exceed duration
+    v_trim = (v_trim[0], min(v_trim[1], actual_duration))
     st.session_state.v_trim = list(v_trim)
+    
     c1, c2, c3 = st.columns(3)
     c1.metric("Start", fmt_time(v_trim[0]))
     c2.metric("End", fmt_time(v_trim[1]))
     c3.metric("Duration", fmt_time(v_trim[1] - v_trim[0]))
 elif ov and is_img and st.session_state.bg_dur > 0:
     st.subheader("Image Duration")
-    max_dur = st.session_state.a_trim[1] - st.session_state.a_trim[0]
+    # Use the actual audio trim duration, not the max slider range
+    audio_duration = st.session_state.a_trim[1] - st.session_state.a_trim[0]
+    max_dur = max(1.0, audio_duration)  # Ensure at least 1 second
+    
+    # Ensure current image duration is within bounds
+    current_dur = min(st.session_state.img_dur, max_dur)
+    st.session_state.img_dur = current_dur
+    
     st.session_state.img_dur = st.slider("Display time", 1.0, float(max_dur), 
-                                        min(30.0, float(max_dur)), 0.5, format="%.1fs")
+                                        min(float(max_dur), float(st.session_state.img_dur)), 0.5, format="%.1fs")
 
 # Output format selection
 if bg and ov:
@@ -253,8 +304,26 @@ if st.button("🎬 Create Video", type="primary", disabled=not (bg and ov), use_
                 else:
                     audio_src = AudioFileClip(bg_path)
                 
-                audio = audio_src.audio.subclip(*st.session_state.a_trim) if is_vid else audio_src.subclip(*st.session_state.a_trim)
+                # Get the actual audio duration
+                actual_audio_duration = float(audio_src.audio.duration) if is_vid else float(audio_src.duration)
+                
+                # Ensure trim values don't exceed actual duration
+                trim_start = min(st.session_state.a_trim[0], actual_audio_duration - 0.1)
+                trim_end = min(st.session_state.a_trim[1], actual_audio_duration)
+                
+                # If start and end are too close, adjust
+                if trim_end - trim_start < 0.1:
+                    trim_end = min(trim_start + 1.0, actual_audio_duration)
+                
+                # Extract audio with safe trimming
+                if is_vid:
+                    audio = audio_src.audio.subclip(trim_start, trim_end)
+                else:
+                    audio = audio_src.subclip(trim_start, trim_end)
+                
                 dur = audio.duration
+                
+                st.info(f"🎵 Using audio from {trim_start:.1f}s to {trim_end:.1f}s (duration: {dur:.1f}s)")
                 
             except Exception as e:
                 st.error(f"❌ Error loading audio: {e}")
@@ -270,38 +339,81 @@ if st.button("🎬 Create Video", type="primary", disabled=not (bg and ov), use_
                     if target_dims:
                         img_arr = resize_frame(img_arr, target_dims)
                     
+                    # Use the actual audio duration, not the slider max
                     img_dur = min(st.session_state.img_dur, dur)
                     ov_final = ImageClip(img_arr, duration=img_dur)
                     
+                    # If image duration is shorter than audio, create background
                     if img_dur < dur:
+                        # Create black background
                         bg_clip = ColorClip(size=ov_final.size, color=(0,0,0), duration=dur)
+                        # Composite image over background
                         ov_final = CompositeVideoClip([bg_clip, ov_final.set_position('center')], duration=dur)
+                    else:
+                        # If image duration equals or exceeds audio, use just the image
+                        ov_final = ov_final.set_duration(dur)
+                        
                 except Exception as e:
                     st.error(f"❌ Error processing image: {e}")
                     raise
             else:
                 try:
-                    ov_final = VideoFileClip(ov_path, audio=False).subclip(*st.session_state.v_trim)
+                    # Load video overlay
+                    ov_clip = VideoFileClip(ov_path, audio=False)
+                    actual_video_duration = float(ov_clip.duration)
                     
-                    # Loop if needed
+                    # Ensure trim values don't exceed actual video duration
+                    v_trim_start = min(st.session_state.v_trim[0], actual_video_duration - 0.1)
+                    v_trim_end = min(st.session_state.v_trim[1], actual_video_duration)
+                    
+                    # If start and end are too close, adjust
+                    if v_trim_end - v_trim_start < 0.1:
+                        v_trim_end = min(v_trim_start + 1.0, actual_video_duration)
+                    
+                    ov_final = ov_clip.subclip(v_trim_start, v_trim_end)
+                    
+                    st.info(f"🎥 Using video from {v_trim_start:.1f}s to {v_trim_end:.1f}s (duration: {ov_final.duration:.1f}s)")
+                    
+                    # Loop video if needed to match audio duration
                     if ov_final.duration < dur:
-                        loops = int(dur / ov_final.duration) + 1
-                        ov_final = concatenate_videoclips([ov_final] * loops).subclip(0, dur)
+                        loops_needed = int(dur / ov_final.duration) + 1
+                        ov_final = concatenate_videoclips([ov_final] * loops_needed)
+                        ov_final = ov_final.subclip(0, dur)
+                        st.info(f"🔄 Looped video {loops_needed} times to match audio")
                     elif ov_final.duration > dur:
                         ov_final = ov_final.subclip(0, dur)
+                        st.info("✂️ Trimmed video to match audio duration")
                     
                     # Apply resize using cv2 if target dims specified
                     if target_dims:
                         st.info("⏳ Resizing video frames... this may take a moment")
                         ov_final = apply_resize_to_clip(ov_final, target_dims)
+                        
+                    ov_clip.close()
+                    
                 except Exception as e:
                     st.error(f"❌ Error processing video overlay: {e}")
                     raise
             
-            # Create final video
-            final = ov_final.set_audio(audio).set_duration(dur)
+            # Create final video - ensure durations match
+            final_duration = min(dur, ov_final.duration)
+            
+            # If durations don't match, use the shorter one
+            if abs(dur - ov_final.duration) > 0.1:
+                st.warning(f"⚠️ Duration mismatch: Audio={dur:.1f}s, Video={ov_final.duration:.1f}s. Using {final_duration:.1f}s")
+                # Trim audio to match video if needed
+                if dur > final_duration:
+                    audio = audio.subclip(0, final_duration)
+                # Trim video to match audio if needed
+                if ov_final.duration > final_duration:
+                    ov_final = ov_final.subclip(0, final_duration)
+            
+            # Set audio and duration
+            final = ov_final.set_audio(audio).set_duration(final_duration)
             out = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4").name
             
+            # Write video file with error handling
+            st.info("📹 Rendering video...")
             final.write_videofile(
                 out, 
                 fps=30,
@@ -310,7 +422,8 @@ if st.button("🎬 Create Video", type="primary", disabled=not (bg and ov), use_
                 bitrate="8M", 
                 verbose=False, 
                 logger=None,
-                preset='medium'
+                preset='medium',
+                threads=4  # Use multiple threads for faster processing
             )
         
         st.success("✅ Video created successfully!")
@@ -318,9 +431,10 @@ if st.button("🎬 Create Video", type="primary", disabled=not (bg and ov), use_
         
         w, h = final.size
         c1, c2, c3 = st.columns(3)
-        c1.metric("Duration", f"{dur:.1f}s")
+        c1.metric("Duration", f"{final_duration:.1f}s")
         c2.metric("Resolution", f"{w}×{h}")
-        c3.metric("Size", f"{os.path.getsize(out)/(1024*1024):.1f}MB")
+        file_size = os.path.getsize(out)/(1024*1024)
+        c3.metric("Size", f"{file_size:.1f}MB")
         
         format_name = selected_preset.split(" - ")[0].replace("📱 ", "").replace("📺 ", "").replace("⬜ ", "").replace(" ", "_")
         
