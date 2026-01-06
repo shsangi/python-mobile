@@ -8,9 +8,9 @@ from moviepy.video.VideoClip import ColorClip
 import cv2
 import mimetypes
 
-st.set_page_config(page_title="🎬 Mobile Video Maker v2", layout="centered")
+st.set_page_config(page_title="🎬 PS Video", layout="centered")
 st.markdown('<style>[data-testid="stSidebar"]{display:none}.stButton>button{width:100%}</style>', unsafe_allow_html=True)
-st.title("🎬 Mobile Video Maker")
+st.title("🎬 PS Video")
 st.caption("Combine audio with video - Choose your output format")
 
 # Preset dimensions for mobile
