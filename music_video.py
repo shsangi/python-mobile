@@ -8,9 +8,9 @@ from moviepy.video.VideoClip import ColorClip
 import cv2
 import mimetypes
 
-st.set_page_config(page_title="🎬 PS Video", layout="centered")
+st.set_page_config(page_title="🎬 Mobile Video Maker v2", layout="centered")
 st.markdown('<style>[data-testid="stSidebar"]{display:none}.stButton>button{width:100%}</style>', unsafe_allow_html=True)
-st.title("🎬 PS Video")
+st.title("🎬 Mobile Video Maker")
 st.caption("Combine audio with video - Choose your output format")
 
 # Preset dimensions for mobile
@@ -323,6 +323,12 @@ if st.button("🎬 Create Video", type="primary", disabled=not (bg and ov), use_
         with st.spinner("Processing video..."):
             # Extract audio from background file
             is_vid = is_video_file(bg_path)
+            audio_src = None
+            audio = None
+            ov_clip = None
+            ov_final = None
+            final = None
+            
             try:
                 if is_vid:
                     clip = VideoFileClip(bg_path)
@@ -395,8 +401,6 @@ if st.button("🎬 Create Video", type="primary", disabled=not (bg and ov), use_
                     if target_dims:
                         st.info("⏳ Resizing video frames...")
                         ov_final = apply_resize_to_clip(ov_final, target_dims)
-                        
-                    ov_clip.close()
                     
                     # Create final video
                     final = ov_final.set_audio(audio).set_duration(dur)
@@ -437,16 +441,18 @@ if st.button("🎬 Create Video", type="primary", disabled=not (bg and ov), use_
         with open(out, "rb") as f:
             st.download_button("📥 Download Video", f, f"{format_name}_{w}x{h}.mp4", "video/mp4", type="primary", use_container_width=True)
         
-        # Cleanup
+        # Cleanup - Don't close clips before using them
         try:
-            audio.close()
-            if not is_img:
+            if audio:
+                audio.close()
+            if audio_src:
+                audio_src.close()
+            if ov_clip:
+                ov_clip.close()
+            if ov_final:
                 ov_final.close()
-            if is_vid:
-                audio_src.close()
-            else:
-                audio_src.close()
-            final.close()
+            if final:
+                final.close()
         except:
             pass
         
