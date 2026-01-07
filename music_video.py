@@ -1,3 +1,4 @@
+
 import streamlit as st 
 import tempfile
 import os
@@ -9,53 +10,7 @@ import cv2
 import mimetypes
 
 st.set_page_config(page_title="🎬 PS Video", layout="centered")
-
-# Add CSS to hide only the labels but keep the uploader functional
-st.markdown("""
-<style>
-    /* Hide "Drag and drop file here" label */
-    [data-testid="stFileUploader"] label div p {
-        visibility: hidden !important;
-        height: 0 !important;
-        margin: 0 !important;
-        padding: 0 !important;
-    }
-    
-    /* Hide file size limit text */
-    [data-testid="stFileUploader"] small {
-        display: none !important;
-    }
-    
-    /* Make the upload area minimal */
-    [data-testid="stFileUploader"] {
-        border: 1px solid #ddd !important;
-        border-radius: 5px !important;
-        padding: 5px !important;
-        min-height: 40px !important;
-        background-color: #f9f9f9 !important;
-    }
-    
-    /* Hide the sidebar */
-    [data-testid="stSidebar"] {
-        display: none !important;
-    }
-    
-    /* Style buttons to full width */
-    .stButton > button {
-        width: 100% !important;
-    }
-    
-    /* Upload section styling */
-    .upload-section {
-        border: 1px solid #ddd;
-        border-radius: 5px;
-        padding: 15px;
-        margin-bottom: 20px;
-        background-color: #f9f9f9;
-    }
-</style>
-""", unsafe_allow_html=True)
-
+st.markdown('<style>[data-testid="stSidebar"]{display:none}.stButton>button{width:100%}</style>', unsafe_allow_html=True)
 st.title("🎬 PS Video")
 
 # Preset dimensions for mobile
@@ -159,21 +114,16 @@ def apply_resize_to_clip(clip, target_size):
     """Apply resize to every frame using cv2"""
     return clip.fl_image(lambda frame: resize_frame(frame, target_size))
 
-# Upload section with custom styling
+# Upload section
 c1, c2 = st.columns(2)
 
 with c1:
-    # Background Audio section
-    st.markdown('<div class="upload-section">', unsafe_allow_html=True)
-    st.markdown("**🎵 Background Audio/Voice**")
-    
     bg = st.file_uploader(
-        " ",
+        "Upload any audio/voice file",
         type=None,  # Accept all file types
         accept_multiple_files=False,
-        help="Upload any audio file (MP3, WAV, M4A, AAC, FLAC, OGG, OPUS, etc.)",
-        key="bg_uploader",
-        label_visibility="collapsed"
+        help="Supported formats: MP3, WAV, M4A, AAC, FLAC, OGG, WMA, OPUS, MP4 (audio), MOV (audio), etc.",
+        key="bg_uploader"
     )
     
     if bg and (bg.name != st.session_state.bg_name or not os.path.exists(st.session_state.bg_path)):
@@ -192,7 +142,7 @@ with c1:
                         # SET DEFAULT: Use full audio duration
                         st.session_state.a_trim = [0.0, bg_duration]
                         st.session_state.bg_dur = bg_duration
-                        st.success(f"✅ **Audio loaded:** {bg.name} ({bg_duration:.1f}s)")
+                        st.success(f"✅ Video with audio: {bg.name} ({bg_duration:.1f}s)")
                     else:
                         # Video without audio, try as audio file
                         clip.close()
@@ -201,7 +151,7 @@ with c1:
                             bg_duration = float(audio.duration)
                             st.session_state.a_trim = [0.0, bg_duration]
                             st.session_state.bg_dur = bg_duration
-                            st.success(f"✅ **Audio loaded:** {bg.name} ({bg_duration:.1f}s)")
+                            st.success(f"✅ Audio: {bg.name} ({bg_duration:.1f}s)")
                             audio.close()
                         except:
                             st.error(f"❌ {bg.name} has no audio track")
@@ -217,7 +167,7 @@ with c1:
                     bg_duration = float(audio.duration)
                     st.session_state.a_trim = [0.0, bg_duration]
                     st.session_state.bg_dur = bg_duration
-                    st.success(f"✅ **Audio loaded:** {bg.name} ({bg_duration:.1f}s)")
+                    st.success(f"✅ Audio: {bg.name} ({bg_duration:.1f}s)")
                     audio.close()
                 except Exception as e:
                     st.error(f"❌ Cannot load audio file: {e}")
@@ -231,21 +181,15 @@ with c1:
             st.error(f"❌ Error processing file: {e}")
             bg = None
     elif bg:
-        st.success(f"✅ **Audio loaded:** {st.session_state.bg_name} ({st.session_state.bg_dur:.1f}s)")
-    
-    st.markdown('</div>', unsafe_allow_html=True)
+        st.success(f"✅ Audio loaded: {st.session_state.bg_name} ({st.session_state.bg_dur:.1f}s)")
 
 with c2:
-    # Overlay section
-    st.markdown('<div class="upload-section">', unsafe_allow_html=True)
-    st.markdown("**🖼️ Overlay (Video/Image)**")
     
     ov = st.file_uploader(
-        " ",
+        "Upload video or image",
         type=["mp4", "mov", "avi", "mkv", "webm", "jpg", "jpeg", "png", "gif", "bmp", "webp"],
-        help="Upload video or image file",
-        key="ov_uploader",
-        label_visibility="collapsed"
+        help="Supported: Videos (MP4, MOV, AVI, etc.) and Images (JPG, PNG, GIF, etc.)",
+        key="ov_uploader"
     )
     
     if ov and (ov.name != st.session_state.ov_name or not os.path.exists(st.session_state.ov_path)):
@@ -259,7 +203,7 @@ with c2:
                 try:
                     img = Image.open(ov_path)
                     st.image(img, width=300)
-                    st.success(f"✅ **Image loaded:** {ov.name}")
+                    st.success(f"✅ Image: {ov.name}")
                     # For images, set default duration to match audio duration
                     if st.session_state.bg_dur > 0:
                         st.session_state.img_dur = float(st.session_state.bg_dur)
@@ -276,7 +220,7 @@ with c2:
                     st.session_state.ov_dur = ov_duration
                     w, h = ov_clip.size
                     orientation = "Portrait" if h > w else "Landscape" if w > h else "Square"
-                    st.success(f"✅ **Video loaded:** {ov.name} ({ov_duration:.1f}s)")
+                    st.success(f"✅ Video: {ov.name} ({ov_duration:.1f}s)")
                     st.info(f"📐 {w}×{h} ({orientation})")
                     ov_clip.close()
                 except Exception as e:
@@ -287,15 +231,13 @@ with c2:
             ov = None
     elif ov:
         if st.session_state.is_img:
-            st.success(f"✅ **Image loaded:** {st.session_state.ov_name}")
+            st.success(f"✅ Image loaded: {st.session_state.ov_name}")
         else:
-            st.success(f"✅ **Video loaded:** {st.session_state.ov_name} ({st.session_state.ov_dur:.1f}s)")
-    
-    st.markdown('</div>', unsafe_allow_html=True)
+            st.success(f"✅ Video loaded: {st.session_state.ov_name} ({st.session_state.ov_dur:.1f}s)")
 
 # Audio trim - Allow full control
 if bg and st.session_state.bg_dur > 0:
-    st.subheader("🎵 Audio Selection")
+    st.subheader("Audio Selection")
     
     # Get actual duration
     actual_duration = float(st.session_state.bg_dur)
@@ -326,7 +268,7 @@ if bg and st.session_state.bg_dur > 0:
 
 # Video overlay settings
 if ov and not st.session_state.is_img and st.session_state.ov_dur > 0:
-    st.subheader("🎥 Video Overlay Settings")
+    st.subheader("Video Overlay Settings")
     
     # Get actual duration
     actual_duration = float(st.session_state.ov_dur)
@@ -356,7 +298,7 @@ if ov and not st.session_state.is_img and st.session_state.ov_dur > 0:
 
 # Image overlay settings
 elif ov and st.session_state.is_img and st.session_state.bg_dur > 0:
-    st.subheader("🖼️ Image Settings")
+    st.subheader("Image Settings")
     
     # Get audio duration for max limit
     audio_duration = st.session_state.a_trim[1] - st.session_state.a_trim[0]
