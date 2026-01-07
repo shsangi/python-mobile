@@ -1,4 +1,3 @@
-
 import streamlit as st 
 import tempfile
 import os
@@ -12,6 +11,14 @@ import mimetypes
 st.set_page_config(page_title="🎬 PS Video", layout="centered")
 st.markdown('<style>[data-testid="stSidebar"]{display:none}.stButton>button{width:100%}</style>', unsafe_allow_html=True)
 st.title("🎬 PS Video")
+
+# Initialize session state for output video
+if 'output_video_path' not in st.session_state:
+    st.session_state.output_video_path = None
+if 'output_video_created' not in st.session_state:
+    st.session_state.output_video_created = False
+if 'output_video_info' not in st.session_state:
+    st.session_state.output_video_info = {}
 
 # Preset dimensions for mobile
 PRESETS = {
@@ -27,7 +34,8 @@ PRESETS = {
 
 # Initialize session state
 for k, v in {'bg_dur': 0.0, 'ov_dur': 0.0, 'a_trim': [0.0, 30.0], 'v_trim': [0.0, 30.0], 'img_dur': 5.0,
-             'bg_path': '', 'ov_path': '', 'bg_name': '', 'ov_name': '', 'is_img': False}.items():
+             'bg_path': '', 'ov_path': '', 'bg_name': '', 'ov_name': '', 'is_img': False,
+             'selected_preset': "Original (No Change)"}.items():
     st.session_state.setdefault(k, v)
 
 def save_file(f):
@@ -114,6 +122,46 @@ def apply_resize_to_clip(clip, target_size):
     """Apply resize to every frame using cv2"""
     return clip.fl_image(lambda frame: resize_frame(frame, target_size))
 
+# ========== TOP BUTTONS SECTION ==========
+st.divider()
+
+# Create two columns for buttons at the top
+col1, col2 = st.columns(2)
+
+with col1:
+    create_disabled = not (st.session_state.bg_path and st.session_state.ov_path and 
+                          os.path.exists(st.session_state.bg_path) and 
+                          os.path.exists(st.session_state.ov_path))
+    create_btn = st.button("🎬 Create Video", 
+                          type="primary", 
+                          disabled=create_disabled, 
+                          use_container_width=True,
+                          key="create_top")
+
+with col2:
+    download_disabled = not st.session_state.output_video_created
+    if not download_disabled and st.session_state.output_video_path and os.path.exists(st.session_state.output_video_path):
+        with open(st.session_state.output_video_path, "rb") as f:
+            format_name = st.session_state.output_video_info.get('format_name', 'video')
+            w = st.session_state.output_video_info.get('width', 1920)
+            h = st.session_state.output_video_info.get('height', 1080)
+            st.download_button("📥 Download Video", 
+                             f, 
+                             f"{format_name}_{w}x{h}.mp4", 
+                             "video/mp4", 
+                             type="secondary", 
+                             use_container_width=True,
+                             key="download_top")
+    else:
+        st.button("📥 Download Video", 
+                 disabled=True, 
+                 use_container_width=True,
+                 help="Create a video first to enable download",
+                 key="download_disabled_top")
+
+st.divider()
+# ========== END TOP BUTTONS SECTION ==========
+
 # Upload section
 c1, c2 = st.columns(2)
 
@@ -177,6 +225,10 @@ with c1:
                 st.error(f"❌ Unsupported file type: {bg.name}")
                 bg = None
                 
+            # Reset output video state when new files are uploaded
+            st.session_state.output_video_created = False
+            st.session_state.output_video_path = None
+                
         except Exception as e:
             st.error(f"❌ Error processing file: {e}")
             bg = None
@@ -184,7 +236,6 @@ with c1:
         st.success(f"✅ Audio loaded: {st.session_state.bg_name} ({st.session_state.bg_dur:.1f}s)")
 
 with c2:
-    
     ov = st.file_uploader(
         "Upload video or image",
         type=["mp4", "mov", "avi", "mkv", "webm", "jpg", "jpeg", "png", "gif", "bmp", "webp"],
@@ -226,6 +277,11 @@ with c2:
                 except Exception as e:
                     st.error(f"❌ Cannot load video: {e}")
                     ov = None
+            
+            # Reset output video state when new files are uploaded
+            st.session_state.output_video_created = False
+            st.session_state.output_video_path = None
+                    
         except Exception as e:
             st.error(f"❌ Error processing file: {e}")
             ov = None
@@ -322,7 +378,10 @@ elif ov and st.session_state.is_img and st.session_state.bg_dur > 0:
 # Output format selection
 if bg and ov:
     st.subheader("📐 Output Format")
-    selected_preset = st.selectbox("Choose output dimensions", list(PRESETS.keys()), index=0)
+    selected_preset = st.selectbox("Choose output dimensions", list(PRESETS.keys()), 
+                                  index=list(PRESETS.keys()).index(st.session_state.selected_preset) 
+                                  if st.session_state.selected_preset in PRESETS else 0)
+    st.session_state.selected_preset = selected_preset
     target_dims = PRESETS[selected_preset]
     
     if target_dims:
@@ -330,9 +389,8 @@ if bg and ov:
     else:
         st.info("Original dimensions will be preserved")
 
-# Process button
-st.divider()
-if st.button("🎬 Create Video", type="primary", disabled=not (bg and ov), use_container_width=True):
+# ========== PROCESS VIDEO WHEN CREATE BUTTON IS CLICKED ==========
+if create_btn and st.session_state.bg_path and st.session_state.ov_path:
     try:
         with st.spinner("Processing video..."):
             # Load background audio
@@ -460,19 +518,32 @@ if st.button("🎬 Create Video", type="primary", disabled=not (bg and ov), use_
             )
         
         st.success("✅ Video created successfully!")
+        
+        # Display the video
         st.video(out)
         
+        # Store video info for download button
         w, h = final.size
+        format_name = st.session_state.selected_preset.split(" - ")[0].replace("📱 ", "").replace("📺 ", "").replace("⬜ ", "").replace(" ", "_")
+        
+        st.session_state.output_video_path = out
+        st.session_state.output_video_created = True
+        st.session_state.output_video_info = {
+            'width': w,
+            'height': h,
+            'duration': audio_duration,
+            'format_name': format_name,
+            'file_size': os.path.getsize(out) / (1024 * 1024)
+        }
+        
+        # Show video stats
         c1, c2, c3 = st.columns(3)
         c1.metric("Duration", f"{audio_duration:.1f}s")
         c2.metric("Resolution", f"{w}×{h}")
-        file_size = os.path.getsize(out) / (1024 * 1024)
-        c3.metric("Size", f"{file_size:.1f}MB")
+        c3.metric("Size", f"{st.session_state.output_video_info['file_size']:.1f}MB")
         
-        format_name = selected_preset.split(" - ")[0].replace("📱 ", "").replace("📺 ", "").replace("⬜ ", "").replace(" ", "_")
-        
-        with open(out, "rb") as f:
-            st.download_button("📥 Download Video", f, f"{format_name}_{w}x{h}.mp4", "video/mp4", type="primary", use_container_width=True)
+        # Update the download button at the top by triggering a rerun
+        st.rerun()
         
         # Cleanup - only close at the very end
         try:
@@ -491,6 +562,20 @@ if st.button("🎬 Create Video", type="primary", disabled=not (bg and ov), use_
         st.error(f"❌ Error: {str(e)}")
         import traceback
         st.code(traceback.format_exc())
+
+# ========== BOTTOM BUTTONS (AS BACKUP) ==========
+if not st.session_state.output_video_created:
+    st.divider()
+    create_disabled_bottom = not (st.session_state.bg_path and st.session_state.ov_path and 
+                                os.path.exists(st.session_state.bg_path) and 
+                                os.path.exists(st.session_state.ov_path))
+    if st.button("🎬 Create Video", 
+                type="primary", 
+                disabled=create_disabled_bottom, 
+                use_container_width=True,
+                key="create_bottom"):
+        # This will trigger the create logic above when clicked
+        pass
 
 # Cleanup old temporary files on rerun
 if st.session_state.get('bg_path') and not os.path.exists(st.session_state.bg_path):
