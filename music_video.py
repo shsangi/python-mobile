@@ -10,17 +10,29 @@ import mimetypes
 
 st.set_page_config(page_title="🎬 PS Video", layout="centered")
 
-# Add CSS to hide the uploader labels and file limit text
+# Add CSS to completely hide the uploader drag-and-drop area
 st.markdown("""
 <style>
-    /* Hide "Drag and drop file here" label */
-    [data-testid="stFileUploader"] label div p {
+    /* Hide the entire upload area including drag-and-drop */
+    [data-testid="stFileUploader"] {
         display: none !important;
     }
     
-    /* Hide file size limit text */
-    [data-testid="stFileUploader"] small {
-        display: none !important;
+    /* Show only the browse files button */
+    .custom-upload-button {
+        display: block !important;
+        width: 100%;
+        padding: 10px;
+        border: 2px dashed #ccc;
+        border-radius: 5px;
+        text-align: center;
+        cursor: pointer;
+        margin-bottom: 10px;
+    }
+    
+    .custom-upload-button:hover {
+        border-color: #4CAF50;
+        background-color: #f9f9f9;
     }
     
     /* Hide the sidebar */
@@ -33,16 +45,10 @@ st.markdown("""
         width: 100% !important;
     }
     
-    /* Optional: Style the upload area */
-    [data-testid="stFileUploader"] {
-        border: 2px dashed #ccc;
-        border-radius: 5px;
-        padding: 10px;
-    }
-    
-    /* Optional: Style the drag-and-drop text when hovering */
-    [data-testid="stFileUploader"]:hover {
-        border-color: #4CAF50;
+    /* Hide file info text */
+    .uploadedFile {
+        font-size: 14px;
+        margin-bottom: 5px;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -154,15 +160,18 @@ def apply_resize_to_clip(clip, target_size):
 c1, c2 = st.columns(2)
 
 with c1:
-    # Custom uploader styling - hide labels
     st.markdown("**Background Audio/Voice**")
+    
+    # Custom styled upload button
+    st.markdown('<div class="custom-upload-button">🎵 Click to upload audio file</div>', unsafe_allow_html=True)
+    
     bg = st.file_uploader(
-        " ",  # Empty label
+        "Upload any audio/voice file",
         type=None,  # Accept all file types
         accept_multiple_files=False,
-        help="Upload audio file (MP3, WAV, M4A, AAC, FLAC, etc.)",
+        help="Supported formats: MP3, WAV, M4A, AAC, FLAC, OGG, WMA, OPUS, MP4 (audio), MOV (audio), etc.",
         key="bg_uploader",
-        label_visibility="collapsed"  # This hides the label
+        label_visibility="collapsed"
     )
     
     if bg and (bg.name != st.session_state.bg_name or not os.path.exists(st.session_state.bg_path)):
@@ -223,14 +232,17 @@ with c1:
         st.success(f"✅ Audio loaded: {st.session_state.bg_name} ({st.session_state.bg_dur:.1f}s)")
 
 with c2:
-    # Custom uploader styling - hide labels
     st.markdown("**Overlay (Video/Image)**")
+    
+    # Custom styled upload button
+    st.markdown('<div class="custom-upload-button">🖼️ Click to upload video/image</div>', unsafe_allow_html=True)
+    
     ov = st.file_uploader(
-        " ",  # Empty label
+        "Upload video or image",
         type=["mp4", "mov", "avi", "mkv", "webm", "jpg", "jpeg", "png", "gif", "bmp", "webp"],
-        help="Upload video or image file",
+        help="Supported: Videos (MP4, MOV, AVI, etc.) and Images (JPG, PNG, GIF, etc.)",
         key="ov_uploader",
-        label_visibility="collapsed"  # This hides the label
+        label_visibility="collapsed"
     )
     
     if ov and (ov.name != st.session_state.ov_name or not os.path.exists(st.session_state.ov_path)):
@@ -275,9 +287,6 @@ with c2:
             st.success(f"✅ Image loaded: {st.session_state.ov_name}")
         else:
             st.success(f"✅ Video loaded: {st.session_state.ov_name} ({st.session_state.ov_dur:.1f}s)")
-
-# Rest of your code remains the same...
-# [Keep all the rest of your code exactly as it was from here...]
 
 # Audio trim - Allow full control
 if bg and st.session_state.bg_dur > 0:
