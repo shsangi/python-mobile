@@ -11,7 +11,6 @@ import mimetypes
 st.set_page_config(page_title="🎬 PS Video", layout="centered")
 st.markdown('<style>[data-testid="stSidebar"]{display:none}.stButton>button{width:100%}</style>', unsafe_allow_html=True)
 st.title("🎬 PS Video")
-st.caption("Combine audio with video - Choose your output format")
 
 # Preset dimensions for mobile
 PRESETS = {
@@ -118,7 +117,6 @@ def apply_resize_to_clip(clip, target_size):
 c1, c2 = st.columns(2)
 
 with c1:
-    st.markdown("**Background Audio/Voice**")
     bg = st.file_uploader(
         "Upload any audio/voice file",
         type=None,  # Accept all file types
@@ -185,7 +183,7 @@ with c1:
         st.success(f"✅ Audio loaded: {st.session_state.bg_name} ({st.session_state.bg_dur:.1f}s)")
 
 with c2:
-    st.markdown("**Overlay (Video/Image)**")
+    
     ov = st.file_uploader(
         "Upload video or image",
         type=["mp4", "mov", "avi", "mkv", "webm", "jpg", "jpeg", "png", "gif", "bmp", "webp"],
