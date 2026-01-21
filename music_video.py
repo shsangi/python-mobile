@@ -8,9 +8,9 @@ from moviepy.video.VideoClip import ColorClip
 import cv2
 import mimetypes
 
-st.set_page_config(page_title="🎬 PS Video v2", layout="centered")
+st.set_page_config(page_title="🎬 PS Video", layout="centered")
 st.markdown('<style>[data-testid="stSidebar"]{display:none}.stButton>button{width:100%}</style>', unsafe_allow_html=True)
-st.title("🎬 PS Video v2")
+st.title("🎬 PS Video")
 
 # Preset dimensions for mobile
 PRESETS = {
@@ -293,10 +293,6 @@ if ov and not st.session_state.is_img and st.session_state.ov_dur > 0:
     video_segment_duration = v_trim[1] - v_trim[0]
     c3.metric("Duration", fmt_time(video_segment_duration))
     
-    # Access audio_duration from session state or calculate
-    if 'audio_duration' not in locals():
-        audio_duration = st.session_state.a_trim[1] - st.session_state.a_trim[0]
-    
     st.info(f"🎥 Video segment ({fmt_time(video_segment_duration)}) will be looped/trimmed to match audio duration: {fmt_time(audio_duration)}")
 
 # Image overlay settings
@@ -418,12 +414,19 @@ if st.button("🎬 Create Video", type="primary", disabled=not (bg and ov), use_
                     if video_duration < audio_duration:
                         # Loop the video
                         loops_needed = int(np.ceil(audio_duration / video_duration))
-                        ov_final = concatenate_videoclips([video_segment] * loops_needed)
+                        # Create copies to avoid reference issues
+                        clips_to_concatenate = []
+                        for i in range(loops_needed):
+                            # Create a fresh subclip for each loop
+                            clip_copy = ov_clip.subclip(v_trim_start, v_trim_end)
+                            clips_to_concatenate.append(clip_copy)
+                        
+                        ov_final = concatenate_videoclips(clips_to_concatenate)
                         ov_final = ov_final.subclip(0, audio_duration)
                         st.info(f"🔄 Looped video {loops_needed} times to match audio")
                     elif video_duration > audio_duration:
-                        # Trim the video
-                        ov_final = video_segment.subclip(0, audio_duration)
+                        # Trim the video - create a fresh subclip
+                        ov_final = ov_clip.subclip(v_trim_start, v_trim_start + audio_duration)
                         st.info("✂️ Trimmed video to match audio duration")
                     else:
                         # Durations match exactly
@@ -437,12 +440,21 @@ if st.button("🎬 Create Video", type="primary", disabled=not (bg and ov), use_
                     # Create final video
                     final = ov_final.set_audio(audio_segment)
                     
-                    # Close the original clip only
-                    ov_clip.close()
-                    # DO NOT close video_segment here - it's still being used by ov_final
+                    # NO CLOSING HERE - we'll close everything at the end
                     
                 except Exception as e:
                     st.error(f"❌ Error processing video: {e}")
+                    # Clean up if error occurs
+                    if 'ov_clip' in locals() and ov_clip:
+                        try:
+                            ov_clip.close()
+                        except:
+                            pass
+                    if 'video_segment' in locals() and video_segment:
+                        try:
+                            video_segment.close()
+                        except:
+                            pass
                     raise
             
             # Save final video
@@ -491,7 +503,15 @@ if st.button("🎬 Create Video", type="primary", disabled=not (bg and ov), use_
                 final.close()
             if 'ov_clip' in locals() and ov_clip:
                 ov_clip.close()
-        except:
+            # Close any concatenated clips
+            if 'clips_to_concatenate' in locals():
+                for clip in clips_to_concatenate:
+                    try:
+                        clip.close()
+                    except:
+                        pass
+        except Exception as cleanup_error:
+            # Don't show cleanup errors to user
             pass
         
     except Exception as e:
