@@ -1,5 +1,4 @@
-
-import streamlit as st 
+import streamlit as st
 import tempfile
 import os
 from PIL import Image
@@ -9,7 +8,7 @@ from moviepy.video.VideoClip import ColorClip
 import cv2
 import mimetypes
 
-st.set_page_config(page_title="🎬 PS Video", layout="centered")
+st.set_page_config(page_title="🎬 PS Video v2", layout="centered")
 st.markdown('<style>[data-testid="stSidebar"]{display:none}.stButton>button{width:100%}</style>', unsafe_allow_html=True)
 st.title("🎬 PS Video")
 
@@ -294,6 +293,10 @@ if ov and not st.session_state.is_img and st.session_state.ov_dur > 0:
     video_segment_duration = v_trim[1] - v_trim[0]
     c3.metric("Duration", fmt_time(video_segment_duration))
     
+    # Access audio_duration from session state or calculate
+    if 'audio_duration' not in locals():
+        audio_duration = st.session_state.a_trim[1] - st.session_state.a_trim[0]
+    
     st.info(f"🎥 Video segment ({fmt_time(video_segment_duration)}) will be looped/trimmed to match audio duration: {fmt_time(audio_duration)}")
 
 # Image overlay settings
@@ -434,9 +437,9 @@ if st.button("🎬 Create Video", type="primary", disabled=not (bg and ov), use_
                     # Create final video
                     final = ov_final.set_audio(audio_segment)
                     
-                    # Close the original clip
+                    # Close the original clip only
                     ov_clip.close()
-                    video_segment.close()
+                    # DO NOT close video_segment here - it's still being used by ov_final
                     
                 except Exception as e:
                     st.error(f"❌ Error processing video: {e}")
@@ -480,10 +483,14 @@ if st.button("🎬 Create Video", type="primary", disabled=not (bg and ov), use_
                 audio_segment.close()
             if audio_src:
                 audio_src.close()
+            if 'video_segment' in locals() and video_segment:
+                video_segment.close()
             if ov_final:
                 ov_final.close()
             if final:
                 final.close()
+            if 'ov_clip' in locals() and ov_clip:
+                ov_clip.close()
         except:
             pass
         
